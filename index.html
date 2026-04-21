@@ -510,9 +510,22 @@
 
     /* ===== レスポンシブ ===== */
     @media (max-width: 600px) {
-      .main { flex-direction: column; }
+      .main { flex-direction: column; overflow: hidden; }
       #map { height: 45vh; flex: none; }
-      #side-panel { width: 100%; flex: 1; min-height: 0; }
+      #side-panel {
+        width: 100%;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .tab-content {
+        overflow-y: scroll;
+        -webkit-overflow-scrolling: touch;
+        flex: 1;
+        min-height: 0;
+      }
     }
   </style>
 </head>
