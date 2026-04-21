@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>巡回・点検チェックアプリ</title>
+
+  <!-- Leaflet.js: OpenStreetMap を表示するためのライブラリ -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    /* ===== 全体レイアウト ===== */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
+      background: #f0f4f8;
+      color: #2d3748;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ===== ヘッダー ===== */
+    header {
+      background: #2b6cb0;
+      color: white;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    }
+    header h1 { font-size: 1.2rem; }
+    #gps-status {
+      font-size: 0.8rem;
+      background: rgba(255,255,255,0.15);
+      padding: 4px 10px;
+      border-radius: 12px;
+    }
+    #gps-status.active { background: #38a169; }
+    #gps-status.error  { background: #e53e3e; }
+
+    /* ===== メインコンテンツ（地図 + サイドパネル） ===== */
+    .main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ===== 地図エリア ===== */
+    #map {
+      flex: 1;
+      cursor: crosshair;
+    }
+
+    /* ===== サイドパネル ===== */
+    #side-panel {
+      width: 340px;
+      display: flex;
+      flex-direction: column;
+      background: white;
+      box-shadow: -2px 0 8px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+
+    /* ===== タブ切り替えボタン ===== */
+    .tab-bar {
+      display: flex;
+      border-bottom: 2px solid #e2e8f0;
+      flex-shrink: 0;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      background: #f7fafc;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #718096;
+      transition: all 0.2s;
+    }
+    .tab-btn.active {
+      background: white;
+      color: #2b6cb0;
+      border-bottom: 2px solid #2b6cb0;
+      margin-bottom: -2px;
+    }
+
+    /* ===== タブコンテンツ ===== */
+    .tab-content { display: none; flex: 1; overflow-y: auto; padding: 12px; }
+    .tab-content.active { display: flex; flex-direction: column; gap: 10px; }
+
+    /* ===== チェックポイント追加フォーム ===== */
+    .add-hint {
+      background: #ebf8ff;
+      border: 1px solid #bee3f8;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.82rem;
+      color: #2c5282;
+    }
+    .add-hint strong { display: block; margin-bottom: 4px; }
+
+    /* ===== チェックポイント一覧カード ===== */
+    .checkpoint-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: white;
+      transition: box-shadow 0.2s;
+    }
+    .checkpoint-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .checkpoint-card.checked {
+      border-color: #38a169;
+      background: #f0fff4;
+    }
+
+    /* チェックポイントカードのヘッダー行 */
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .status-dot {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: #cbd5e0; /* 未チェック: グレー */
+    }
+    .status-dot.checked { background: #38a169; } /* チェック済み: 緑 */
+
+    .card-name {
+      font-weight: 600;
+      font-size: 0.9rem;
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .card-meta {
+      font-size: 0.75rem;
+      color: #718096;
+      margin-bottom: 6px;
+    }
+
+    /* チェックポイントカードのボタン行 */
+    .card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .btn {
+      padding: 4px 10px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.78rem;
+      font-weight: 600;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.8; }
+    .btn-check   { background: #38a169; color: white; }
+    .btn-uncheck { background: #e53e3e; color: white; }
+    .btn-focus   { background: #3182ce; color: white; }
+    .btn-delete  { background: #e2e8f0; color: #4a5568; }
+
+    /* ===== 進捗バー ===== */
+    .progress-wrap {
+      background: #edf2f7;
+      border-radius: 8px;
+      padding: 10px 14px;
+      flex-shrink: 0;
+    }
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: #4a5568;
+    }
+    .progress-bar-bg {
+      background: #e2e8f0;
+      border-radius: 4px;
+      height: 10px;
+      overflow: hidden;
+    }
+    .progress-bar {
+      height: 100%;
+      background: #38a169;
+      border-radius: 4px;
+      transition: width 0.4s ease;
+      width: 0%;
+    }
+
+    /* ===== レポートタブ ===== */
+    .report-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .report-header h3 { font-size: 0.95rem; }
+    .btn-print {
+      background: #2b6cb0;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 12px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .btn-print:hover { opacity: 0.85; }
+
+    /* レポートのサマリーボックス */
+    .report-summary {
+      background: #ebf8ff;
+      border: 1px solid #bee3f8;
+      border-radius: 8px;
+      padding: 12px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .summary-item { text-align: center; }
+    .summary-value { font-size: 1.6rem; font-weight: 700; color: #2b6cb0; }
+    .summary-value.ok  { color: #38a169; }
+    .summary-value.ng  { color: #e53e3e; }
+    .summary-label { font-size: 0.72rem; color: #718096; }
+
+    /* レポートの各行 */
+    .report-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: #f7fafc;
+      border: 1px solid #e2e8f0;
+    }
+    .report-row.checked { background: #f0fff4; border-color: #c6f6d5; }
+    .report-icon { font-size: 1.1rem; }
+    .report-info { flex: 1; min-width: 0; }
+    .report-name { font-size: 0.85rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .report-time { font-size: 0.72rem; color: #718096; }
+    .report-badge {
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 10px;
+      flex-shrink: 0;
+    }
+    .badge-ok { background: #c6f6d5; color: #276749; }
+    .badge-ng { background: #fed7d7; color: #9b2c2c; }
+
+    /* ===== 印刷用スタイル ===== */
+    @media print {
+      header, #side-panel .tab-bar, .btn-print, #map { display: none !important; }
+      #side-panel { width: 100%; box-shadow: none; }
+      .tab-content { display: flex !important; }
+      #tab-list, #tab-map-ctrl { display: none !important; }
+      #tab-report { display: flex !important; }
+      body { height: auto; }
+      .main { display: block; }
+    }
+
+    /* ===== モーダルダイアログ（チェックポイント名入力） ===== */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-box {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      width: 320px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+    .modal-box h3 { margin-bottom: 14px; font-size: 1rem; }
+    .modal-box input {
+      width: 100%;
+      border: 1px solid #cbd5e0;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 0.95rem;
+      margin-bottom: 14px;
+      outline: none;
+    }
+    .modal-box input:focus { border-color: #3182ce; box-shadow: 0 0 0 3px rgba(49,130,206,0.2); }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .btn-modal-cancel { background: #e2e8f0; color: #4a5568; }
+    .btn-modal-ok     { background: #2b6cb0; color: white; }
+
+    /* ===== 自動チェック通知トースト ===== */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(60px);
+      background: #2d3748;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      transition: transform 0.3s ease;
+      z-index: 8000;
+      white-space: nowrap;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* ===== GPS追跡サークルのスタイル ===== */
+    .gps-circle {
+      border: 2px solid #3182ce;
+      border-radius: 50%;
+      background: rgba(49,130,206,0.1);
+    }
+
+    /* レスポンシブ: 画面幅が狭いとき縦並びにする */
+    @media (max-width: 600px) {
+      .main { flex-direction: column; }
+      #map { height: 45vh; flex: none; }
+      #side-panel { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ===== ヘッダーバー ===== -->
+<header>
+  <h1>🗺️ 巡回・点検チェックアプリ</h1>
+  <span id="gps-status">GPS: 未取得</span>
+</header>
+
+<!-- ===== メインレイアウト（地図 + サイドパネル） ===== -->
+<div class="main">
+
+  <!-- Leaflet が地図を描画する要素 -->
+  <div id="map"></div>
+
+  <!-- サイドパネル -->
+  <div id="side-panel">
+
+    <!-- タブ切り替えボタン群 -->
+    <div class="tab-bar">
+      <button class="tab-btn active" onclick="switchTab('list')">📋 一覧</button>
+      <button class="tab-btn"        onclick="switchTab('report')">📊 レポート</button>
+    </div>
+
+    <!-- ===== 一覧タブ ===== -->
+    <div id="tab-list" class="tab-content active">
+
+      <!-- 操作ヒント -->
+      <div class="add-hint">
+        <strong>📍 チェックポイントの追加</strong>
+        地図上をクリックして場所を選択し、名前を入力してください。
+      </div>
+
+      <!-- 進捗バー -->
+      <div class="progress-wrap">
+        <div class="progress-label">
+          <span>進捗</span>
+          <span id="progress-text">0 / 0</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar" id="progress-bar"></div>
+        </div>
+      </div>
+
+      <!-- チェックポイントカードのリスト（JavaScriptで動的生成） -->
+      <div id="checkpoint-list"></div>
+
+      <!-- チェックポイントが0件のときの表示 -->
+      <div id="empty-msg" style="text-align:center; color:#a0aec0; font-size:0.85rem; margin-top:20px;">
+        地図をクリックしてチェックポイントを追加してください
+      </div>
+    </div>
+
+    <!-- ===== レポートタブ ===== -->
+    <div id="tab-report" class="tab-content">
+      <div class="report-header">
+        <h3>点検レポート</h3>
+        <button class="btn-print" onclick="window.print()">🖨️ 印刷</button>
+      </div>
+      <!-- サマリー（合計・完了・未了・達成率） -->
+      <div class="report-summary" id="report-summary"></div>
+      <!-- 各チェックポイントの結果行 -->
+      <div id="report-list"></div>
+      <!-- レポート下部の日時 -->
+      <div id="report-footer" style="font-size:0.72rem; color:#a0aec0; text-align:right; margin-top:4px;"></div>
+    </div>
+
+  </div><!-- /side-panel -->
+</div><!-- /main -->
+
+<!-- ===== チェックポイント名入力モーダル ===== -->
+<div class="modal-overlay" id="modal">
+  <div class="modal-box">
+    <h3>📍 チェックポイント名を入力</h3>
+    <input type="text" id="modal-input" placeholder="例: A棟入口、非常口など" maxlength="40" />
+    <div class="modal-actions">
+      <button class="btn btn-modal-cancel" onclick="closeModal(false)">キャンセル</button>
+      <button class="btn btn-modal-ok"     onclick="closeModal(true)">追加する</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 自動チェック通知トースト ===== -->
+<div id="toast"></div>
+
+<script>
+/* ================================================================
+   グローバル変数
+   ================================================================ */
+
+// チェックポイントデータの配列（各要素は下記の形式）
+// { id, name, lat, lng, checked, checkedAt, marker, circle }
+let checkpoints = [];
+let nextId = 1;
+
+// 現在地に関する変数
+let currentLat  = null;
+let currentLng  = null;
+let gpsWatchId  = null; // watchPosition の ID
+let gpsMarker   = null; // 現在地マーカー
+let gpsCircle   = null; // 現在地の精度サークル
+
+// 地図クリック時にモーダルへ渡す仮座標
+let pendingLat = null;
+let pendingLng = null;
+
+// 自動チェック通知のタイマー
+let toastTimer = null;
+
+
+/* ================================================================
+   Leaflet 地図の初期化
+   ================================================================ */
+
+// 初期中心座標: 東京（起動後GPSで更新される）
+const map = L.map('map', { zoomControl: true }).setView([35.6812, 139.7671], 15);
+
+// OpenStreetMap タイルレイヤーを追加
+L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+  attribution: '© OpenStreetMap contributors © CARTO',
+  maxZoom: 19,
+}).addTo(map);
+
+// 地図クリックでチェックポイント追加モーダルを開く
+map.on('click', function (e) {
+  pendingLat = e.latlng.lat;
+  pendingLng = e.latlng.lng;
+  openModal();
+});
+
+
+/* ================================================================
+   カスタムマーカーアイコン（未チェック・チェック済み）
+   ================================================================ */
+
+// 未チェック用マーカーアイコン（グレー）
+function makeIcon(checked) {
+  const color = checked ? '#38a169' : '#718096'; // 緑 or グレー
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 28 36">
+      <path d="M14 0C6.268 0 0 6.268 0 14c0 9.5 14 22 14 22S28 23.5 28 14C28 6.268 21.732 0 14 0z"
+            fill="${color}" stroke="white" stroke-width="2"/>
+      <circle cx="14" cy="14" r="6" fill="white"/>
+      ${checked
+        ? '<polyline points="9,14 12,17 19,10" stroke="'+color+'" stroke-width="2.5" fill="none" stroke-linecap="round"/>'
+        : ''}
+    </svg>`;
+  return L.divIcon({
+    html: svg,
+    iconSize:   [28, 36],
+    iconAnchor: [14, 36], // ピンの先端が座標に合うようにオフセット
+    popupAnchor:[0, -36],
+    className: '',
+  });
+}
+
+
+/* ================================================================
+   モーダルの開閉
+   ================================================================ */
+
+function openModal() {
+  const input = document.getElementById('modal-input');
+  input.value = '';
+  document.getElementById('modal').classList.add('open');
+  // 少し待ってからフォーカスを当てる（アニメーション後）
+  setTimeout(() => input.focus(), 100);
+}
+
+function closeModal(confirmed) {
+  document.getElementById('modal').classList.remove('open');
+  if (!confirmed || pendingLat === null) return;
+
+  const name = document.getElementById('modal-input').value.trim();
+  if (!name) {
+    showToast('⚠️ 名前を入力してください');
+    return;
+  }
+  // チェックポイントを追加する
+  addCheckpoint(name, pendingLat, pendingLng);
+  pendingLat = null;
+  pendingLng = null;
+}
+
+// Enterキーでモーダルを確定できるようにする
+document.getElementById('modal-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') closeModal(true);
+  if (e.key === 'Escape') closeModal(false);
+});
+
+// モーダル背景クリックでキャンセル
+document.getElementById('modal').addEventListener('click', function(e) {
+  if (e.target === this) closeModal(false);
+});
+
+
+/* ================================================================
+   チェックポイントの追加
+   ================================================================ */
+
+function addCheckpoint(name, lat, lng) {
+  const id = nextId++;
+
+  // 地図上にマーカーを配置
+  const marker = L.marker([lat, lng], { icon: makeIcon(false) })
+    .addTo(map)
+    .bindPopup(`<b>${escHtml(name)}</b><br><small>${lat.toFixed(5)}, ${lng.toFixed(5)}</small>`);
+
+  // マーカークリックでポップアップを開く
+  marker.on('click', function() { this.openPopup(); });
+
+  // 自動チェック範囲（30m）を薄い円で可視化
+  const circle = L.circle([lat, lng], {
+    radius: 30,
+    color: '#3182ce',
+    fillColor: '#3182ce',
+    fillOpacity: 0.08,
+    weight: 1.5,
+  }).addTo(map);
+
+  // チェックポイントオブジェクトをリストに追加
+  checkpoints.push({ id, name, lat, lng, checked: false, checkedAt: null, marker, circle });
+
+  // UIを更新
+  renderList();
+  renderReport();
+  saveToStorage();
+}
+
+
+/* ================================================================
+   チェック・アンチェック操作
+   ================================================================ */
+
+function checkPoint(id, isAuto) {
+  const cp = checkpoints.find(c => c.id === id);
+  if (!cp || cp.checked) return;
+
+  cp.checked   = true;
+  cp.checkedAt = new Date().toLocaleString('ja-JP');
+
+  // マーカーアイコンを緑のチェック済みに変更
+  cp.marker.setIcon(makeIcon(true));
+
+  // 自動チェックの場合はトースト通知を表示
+  if (isAuto) showToast(`✅ 自動チェック: ${cp.name}`);
+
+  renderList();
+  renderReport();
+  saveToStorage();
+}
+
+function uncheckPoint(id) {
+  const cp = checkpoints.find(c => c.id === id);
+  if (!cp || !cp.checked) return;
+
+  cp.checked   = false;
+  cp.checkedAt = null;
+
+  // マーカーアイコンを未チェック（グレー）に戻す
+  cp.marker.setIcon(makeIcon(false));
+
+  renderList();
+  renderReport();
+  saveToStorage();
+}
+
+function deletePoint(id) {
+  const idx = checkpoints.findIndex(c => c.id === id);
+  if (idx === -1) return;
+
+  // 地図からマーカーと範囲円を削除
+  map.removeLayer(checkpoints[idx].marker);
+  map.removeLayer(checkpoints[idx].circle);
+
+  checkpoints.splice(idx, 1);
+  renderList();
+  renderReport();
+  saveToStorage();
+}
+
+// マーカーの位置に地図をスクロール（フォーカス）する
+function focusPoint(id) {
+  const cp = checkpoints.find(c => c.id === id);
+  if (!cp) return;
+  map.setView([cp.lat, cp.lng], 18, { animate: true });
+  cp.marker.openPopup();
+}
+
+
+/* ================================================================
+   一覧UIのレンダリング
+   ================================================================ */
+
+function renderList() {
+  const container = document.getElementById('checkpoint-list');
+  const emptyMsg  = document.getElementById('empty-msg');
+  const total     = checkpoints.length;
+  const done      = checkpoints.filter(c => c.checked).length;
+
+  // 進捗バーを更新
+  document.getElementById('progress-text').textContent = `${done} / ${total}`;
+  const pct = total > 0 ? Math.round(done / total * 100) : 0;
+  document.getElementById('progress-bar').style.width = pct + '%';
+
+  // チェックポイントが0件のとき
+  emptyMsg.style.display = total === 0 ? 'block' : 'none';
+  container.innerHTML = '';
+
+  // 各チェックポイントのカードを生成
+  checkpoints.forEach(cp => {
+    const card = document.createElement('div');
+    card.className = 'checkpoint-card' + (cp.checked ? ' checked' : '');
+    card.innerHTML = `
+      <div class="card-header">
+        <div class="status-dot ${cp.checked ? 'checked' : ''}"></div>
+        <div class="card-name">${escHtml(cp.name)}</div>
+      </div>
+      <div class="card-meta">
+        📍 ${cp.lat.toFixed(5)}, ${cp.lng.toFixed(5)}<br>
+        ${cp.checked ? '✅ チェック済: ' + cp.checkedAt : '⬜ 未チェック'}
+      </div>
+      <div class="card-actions">
+        ${!cp.checked
+          ? `<button class="btn btn-check"   onclick="checkPoint(${cp.id}, false)">チェック</button>`
+          : `<button class="btn btn-uncheck" onclick="uncheckPoint(${cp.id})">取り消し</button>`
+        }
+        <button class="btn btn-focus"  onclick="focusPoint(${cp.id})">地図</button>
+        <button class="btn btn-delete" onclick="deletePoint(${cp.id})">削除</button>
+      </div>`;
+    container.appendChild(card);
+  });
+}
+
+
+/* ================================================================
+   レポートUIのレンダリング
+   ================================================================ */
+
+function renderReport() {
+  const total = checkpoints.length;
+  const done  = checkpoints.filter(c => c.checked).length;
+  const pct   = total > 0 ? Math.round(done / total * 100) : 0;
+
+  // サマリーボックスを更新
+  document.getElementById('report-summary').innerHTML = `
+    <div class="summary-item">
+      <div class="summary-value">${total}</div>
+      <div class="summary-label">合計</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-value ok">${done}</div>
+      <div class="summary-label">完了</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-value ng">${total - done}</div>
+      <div class="summary-label">未了</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-value">${pct}%</div>
+      <div class="summary-label">達成率</div>
+    </div>`;
+
+  // 各チェックポイントの結果行を生成
+  const list = document.getElementById('report-list');
+  list.innerHTML = '';
+  checkpoints.forEach((cp, i) => {
+    const row = document.createElement('div');
+    row.className = 'report-row' + (cp.checked ? ' checked' : '');
+    row.innerHTML = `
+      <div class="report-icon">${cp.checked ? '✅' : '⬜'}</div>
+      <div class="report-info">
+        <div class="report-name">${i + 1}. ${escHtml(cp.name)}</div>
+        <div class="report-time">
+          ${cp.checked ? '完了: ' + cp.checkedAt : '未チェック'}
+        </div>
+      </div>
+      <span class="report-badge ${cp.checked ? 'badge-ok' : 'badge-ng'}">
+        ${cp.checked ? 'OK' : 'NG'}
+      </span>`;
+    list.appendChild(row);
+  });
+
+  // レポートの生成日時を更新
+  document.getElementById('report-footer').textContent =
+    'レポート生成: ' + new Date().toLocaleString('ja-JP');
+}
+
+
+/* ================================================================
+   タブ切り替え
+   ================================================================ */
+
+function switchTab(tabName) {
+  // すべてのタブとコンテンツを非アクティブにする
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+  // 選択されたタブをアクティブにする
+  document.getElementById('tab-' + tabName).classList.add('active');
+  event.target.classList.add('active');
+
+  // レポートタブに切り替えたとき内容を最新化
+  if (tabName === 'report') renderReport();
+}
+
+
+/* ================================================================
+   GPS（現在地取得と自動チェック）
+   ================================================================ */
+
+function startGPS() {
+  if (!navigator.geolocation) {
+    setGpsStatus('非対応', 'error');
+    return;
+  }
+
+  setGpsStatus('取得中…', '');
+
+  // watchPosition で継続的に位置情報を取得する
+  gpsWatchId = navigator.geolocation.watchPosition(
+    onGpsSuccess,
+    onGpsError,
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+  );
+}
+
+// GPS取得成功コールバック
+function onGpsSuccess(pos) {
+  currentLat = pos.coords.latitude;
+  currentLng = pos.coords.longitude;
+  const acc  = Math.round(pos.coords.accuracy); // 精度（メートル）
+
+  setGpsStatus(`精度 ±${acc}m`, 'active');
+
+  // 現在地マーカーを更新または作成する
+  if (!gpsMarker) {
+    // 初回: 地図の中心を現在地に移動
+    map.setView([currentLat, currentLng], 16);
+
+    // 現在地マーカー（青い点）
+    gpsMarker = L.circleMarker([currentLat, currentLng], {
+      radius: 8,
+      fillColor: '#3182ce',
+      fillOpacity: 1,
+      color: 'white',
+      weight: 2,
+    }).addTo(map).bindPopup('現在地');
+
+    // GPS精度サークル（薄い青）
+    gpsCircle = L.circle([currentLat, currentLng], {
+      radius: acc,
+      color: '#3182ce',
+      fillColor: '#3182ce',
+      fillOpacity: 0.08,
+      weight: 1,
+    }).addTo(map);
+  } else {
+    // 2回目以降: マーカーと精度サークルの位置を更新
+    gpsMarker.setLatLng([currentLat, currentLng]);
+    gpsCircle.setLatLng([currentLat, currentLng]);
+    gpsCircle.setRadius(acc);
+  }
+
+  // 全チェックポイントとの距離を計算し、30m以内なら自動チェック
+  checkpoints.forEach(cp => {
+    if (cp.checked) return; // すでにチェック済みはスキップ
+    const dist = getDistanceMeters(currentLat, currentLng, cp.lat, cp.lng);
+    if (dist <= 30) {
+      checkPoint(cp.id, true); // 自動チェック
+    }
+  });
+}
+
+// GPS取得失敗コールバック
+function onGpsError(err) {
+  const msgs = {
+    1: 'アクセス拒否',   // PERMISSION_DENIED
+    2: '位置取得失敗',   // POSITION_UNAVAILABLE
+    3: 'タイムアウト',   // TIMEOUT
+  };
+  setGpsStatus(msgs[err.code] || 'エラー', 'error');
+}
+
+// GPSステータス表示を更新する
+function setGpsStatus(text, cls) {
+  const el = document.getElementById('gps-status');
+  el.textContent = 'GPS: ' + text;
+  el.className   = cls || '';
+  if (cls) el.classList.add(cls);
+}
+
+
+/* ================================================================
+   距離計算（ハーバーサイン公式）
+   2点間の距離をメートル単位で返す
+   ================================================================ */
+
+function getDistanceMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000; // 地球の半径（メートル）
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function toRad(deg) { return deg * Math.PI / 180; }
+
+
+/* ================================================================
+   トースト通知（画面下部に一時的に表示するメッセージ）
+   ================================================================ */
+
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+
+  // 前のタイマーをクリア（連続通知に対応）
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+
+/* ================================================================
+   XSS対策: HTML特殊文字をエスケープする
+   ================================================================ */
+
+function escHtml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+
+/* ================================================================
+   localStorage によるデータ永続化
+   ページをリロードしてもチェックポイントが消えないようにする
+   ================================================================ */
+
+function saveToStorage() {
+  // markerとcircle（Leafletオブジェクト）はシリアライズできないため除外する
+  const data = checkpoints.map(({ id, name, lat, lng, checked, checkedAt }) =>
+    ({ id, name, lat, lng, checked, checkedAt })
+  );
+  localStorage.setItem('patrol_checkpoints', JSON.stringify(data));
+  localStorage.setItem('patrol_next_id', String(nextId));
+}
+
+function loadFromStorage() {
+  const raw = localStorage.getItem('patrol_checkpoints');
+  if (!raw) return;
+  try {
+    const data = JSON.parse(raw);
+    nextId = parseInt(localStorage.getItem('patrol_next_id') || '1');
+    data.forEach(d => {
+      // マーカーと円を地図上に再配置する
+      const marker = L.marker([d.lat, d.lng], { icon: makeIcon(d.checked) })
+        .addTo(map)
+        .bindPopup(`<b>${escHtml(d.name)}</b><br><small>${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}</small>`);
+      marker.on('click', function() { this.openPopup(); });
+
+      const circle = L.circle([d.lat, d.lng], {
+        radius: 30, color: '#3182ce',
+        fillColor: '#3182ce', fillOpacity: 0.08, weight: 1.5,
+      }).addTo(map);
+
+      checkpoints.push({ ...d, marker, circle });
+    });
+    renderList();
+    renderReport();
+  } catch (e) {
+    console.warn('保存データの読み込みに失敗:', e);
+  }
+}
+
+
+/* ================================================================
+   アプリ起動処理
+   ================================================================ */
+
+// 保存済みチェックポイントを復元する
+loadFromStorage();
+
+// GPS追跡を開始する
+startGPS();
+
+// 初期表示を描画する
+renderList();
+renderReport();
+
+</script>
+</body>
+</html>
