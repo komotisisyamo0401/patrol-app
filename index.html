@@ -5,12 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ゴミステーション回収チェックアプリ</title>
 
-  <!-- Leaflet.js: OpenStreetMap を表示するためのライブラリ -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
   <style>
-    /* ===== 全体レイアウト ===== */
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
@@ -21,7 +23,6 @@
       flex-direction: column;
     }
 
-    /* ===== ヘッダー ===== */
     header {
       background: #2b6cb0;
       color: white;
@@ -43,7 +44,18 @@
     #gps-status.active { background: #38a169; }
     #gps-status.error  { background: #e53e3e; }
 
-    /* ===== モード切り替えバー ===== */
+    /* 同期ステータス */
+    #sync-status {
+      font-size: 0.72rem;
+      padding: 3px 10px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.2);
+      white-space: nowrap;
+    }
+    #sync-status.sync-ok      { background: #38a169; }
+    #sync-status.sync-error   { background: #e53e3e; }
+    #sync-status.sync-loading { background: rgba(255,255,255,0.25); }
+
     #mode-bar {
       display: flex;
       flex-shrink: 0;
@@ -81,14 +93,12 @@
     #mode-badge.mode-edit    { background: #bee3f8; color: #2c5282; }
     #mode-badge.mode-collect { background: #c6f6d5; color: #276749; }
 
-    /* ===== メインコンテンツ ===== */
     .main {
       display: flex;
       flex: 1;
       overflow: hidden;
     }
 
-    /* ===== 地図エリア ===== */
     #map {
       flex: 1;
       min-width: 0;
@@ -99,7 +109,6 @@
     #map.mode-edit    { cursor: crosshair; }
     #map.mode-collect { cursor: default; }
 
-    /* ===== サイドパネル ===== */
     #side-panel {
       width: 340px;
       flex-shrink: 0;
@@ -112,7 +121,6 @@
       z-index: 1;
     }
 
-    /* ===== タブ切り替え ===== */
     .tab-bar {
       display: flex;
       border-bottom: 2px solid #e2e8f0;
@@ -136,11 +144,9 @@
       margin-bottom: -2px;
     }
 
-    /* ===== タブコンテンツ ===== */
     .tab-content { display: none; flex: 1; overflow-y: auto; padding: 12px; }
     .tab-content.active { display: flex; flex-direction: column; gap: 10px; }
 
-    /* ===== モードヒント ===== */
     .mode-hint {
       border-radius: 8px;
       padding: 10px 14px;
@@ -151,7 +157,6 @@
     .hint-collect { background: #f0fff4; border: 1px solid #c6f6d5; color: #276749; }
     .mode-hint strong { display: block; margin-bottom: 4px; }
 
-    /* ===== 追加先フォルダ選択（追加モード専用） ===== */
     #folder-selector-wrap {
       background: #f7fafc;
       border: 1px solid #e2e8f0;
@@ -179,7 +184,6 @@
     }
     #folder-selector:focus { border-color: #3182ce; }
 
-    /* ===== 全体進捗バー ===== */
     .progress-wrap {
       background: #edf2f7;
       border-radius: 8px;
@@ -208,7 +212,6 @@
       width: 0%;
     }
 
-    /* ===== フォルダセクション ===== */
     .folder-section {
       border: 1px solid #e2e8f0;
       border-radius: 10px;
@@ -216,7 +219,6 @@
       flex-shrink: 0;
     }
 
-    /* フォルダヘッダー（クリックで開閉） */
     .folder-header {
       display: flex;
       align-items: center;
@@ -229,13 +231,11 @@
     }
     .folder-header:hover { background: #edf2f7; }
 
-    /* アクティブフォルダ（追加先として選ばれているフォルダ）は強調表示 */
     .folder-section.active-folder .folder-header {
       background: #ebf8ff;
       border-left: 3px solid #3182ce;
     }
 
-    /* 非表示フォルダ */
     .folder-section.folder-hidden .folder-header {
       opacity: 0.5;
       background: #f0f0f0;
@@ -245,14 +245,12 @@
       color: #a0aec0;
     }
 
-    /* 非表示フォルダのカード */
     .checkpoint-card.card-disabled {
       opacity: 0.4;
       background: #f7fafc;
       pointer-events: none;
     }
 
-    /* 表示切替ボタン */
     .btn-folder-visible {
       padding: 2px 7px;
       border: 1px solid #cbd5e0;
@@ -282,7 +280,6 @@
       color: #2d3748;
     }
 
-    /* フォルダ単位の進捗バッジ */
     .folder-badge {
       font-size: 0.72rem;
       font-weight: 700;
@@ -294,7 +291,6 @@
     }
     .folder-badge.all-done { background: #c6f6d5; color: #276749; }
 
-    /* フォルダの開閉矢印 */
     .folder-toggle {
       font-size: 0.75rem;
       color: #a0aec0;
@@ -303,7 +299,6 @@
     }
     .folder-section.collapsed .folder-toggle { transform: rotate(-90deg); }
 
-    /* フォルダ名変更ボタン（追加モードのみ表示） */
     .btn-folder-rename {
       padding: 2px 8px;
       border: 1px solid #cbd5e0;
@@ -316,7 +311,6 @@
     }
     .btn-folder-rename:hover { background: #edf2f7; }
 
-    /* ===== 上下移動ボタン（フォルダ・チェックポイント共通） ===== */
     .btn-move {
       padding: 1px 6px;
       border: 1px solid #cbd5e0;
@@ -329,10 +323,8 @@
       line-height: 1.4;
     }
     .btn-move:hover { background: #e2e8f0; }
-    /* 無効状態（先頭・末尾）は薄く表示 */
     .btn-move:disabled { opacity: 0.3; cursor: default; }
 
-    /* フォルダ内コンテンツ（チェックポイントカードのリスト） */
     .folder-content {
       padding: 8px;
       display: flex;
@@ -341,10 +333,8 @@
       border-top: 1px solid #e2e8f0;
       background: white;
     }
-    /* 折りたたみ時は非表示 */
     .folder-section.collapsed .folder-content { display: none; }
 
-    /* フォルダ内が空のときのメッセージ */
     .folder-empty {
       text-align: center;
       font-size: 0.78rem;
@@ -352,7 +342,6 @@
       padding: 8px 0;
     }
 
-    /* ===== チェックポイントカード ===== */
     .checkpoint-card {
       border: 1px solid #e2e8f0;
       border-radius: 8px;
@@ -392,7 +381,6 @@
     }
     .card-actions { display: flex; gap: 5px; flex-wrap: wrap; }
 
-    /* ===== ボタン共通 ===== */
     .btn {
       padding: 3px 9px;
       border: none;
@@ -409,7 +397,6 @@
     .btn-delete  { background: #e2e8f0; color: #4a5568; }
     .btn-rename  { background: #e2e8f0; color: #4a5568; }
 
-    /* ===== 初期設定ボタン ===== */
     .default-bar {
       display: flex;
       gap: 6px;
@@ -417,6 +404,7 @@
       background: #fffbeb;
       border-bottom: 1px solid #f6e05e;
       flex-shrink: 0;
+      flex-wrap: wrap;
     }
     .btn-default {
       flex: 1;
@@ -432,8 +420,8 @@
     .btn-save-default  { background: #d69e2e; color: white; }
     .btn-reset-default { background: #e2e8f0; color: #4a5568; }
     .btn-reset-default:disabled { opacity: 0.35; cursor: default; }
+    .btn-export-csv { background: #2c7a7b; color: white; }
 
-    /* ===== レポートタブ ===== */
     .report-header {
       display: flex;
       justify-content: space-between;
@@ -449,7 +437,6 @@
     }
     .btn-print:hover { opacity: 0.85; }
 
-    /* レポートのサマリー */
     .report-summary {
       background: #ebf8ff;
       border: 1px solid #bee3f8;
@@ -465,7 +452,6 @@
     .summary-value.ng { color: #e53e3e; }
     .summary-label { font-size: 0.72rem; color: #718096; }
 
-    /* レポートのフォルダグループ */
     .report-folder-group { flex-shrink: 0; }
     .report-folder-title {
       font-size: 0.8rem;
@@ -488,7 +474,6 @@
       background: #c6f6d5; color: #276749;
     }
 
-    /* レポートの各行 */
     .report-row {
       display: flex;
       align-items: center;
@@ -514,7 +499,6 @@
     .badge-ok { background: #c6f6d5; color: #276749; }
     .badge-ng { background: #fed7d7; color: #9b2c2c; }
 
-    /* ===== 印刷用スタイル ===== */
     @media print {
       header, #mode-bar, .tab-bar, .btn-print, #map { display: none !important; }
       #side-panel { width: 100%; box-shadow: none; }
@@ -525,7 +509,6 @@
       .main { display: block; }
     }
 
-    /* ===== モーダル ===== */
     .modal-overlay {
       display: none;
       position: fixed; inset: 0;
@@ -554,7 +537,6 @@
     .btn-modal-cancel { background: #e2e8f0; color: #4a5568; }
     .btn-modal-ok     { background: #2b6cb0; color: white; }
 
-    /* ===== 軌跡コントロール ===== */
     #track-controls {
       display: flex;
       align-items: center;
@@ -588,7 +570,6 @@
     .btn-track-toggle.hidden-track { background: rgba(255,100,100,0.5); }
     .btn-track-toggle:hover { background: rgba(255,255,255,0.35); }
 
-    /* ===== トースト通知 ===== */
     #toast {
       position: fixed;
       bottom: 24px; left: 50%;
@@ -602,7 +583,6 @@
     }
     #toast.show { transform: translateX(-50%) translateY(0); }
 
-    /* ===== レスポンシブ ===== */
     @media (max-width: 600px) {
       .main { flex-direction: column; overflow: hidden; }
       #map { height: 45vh; flex: none; }
@@ -625,10 +605,10 @@
 </head>
 <body>
 
-<!-- ===== ヘッダー ===== -->
 <header>
   <h1>🗺️ ゴミステーション回収チェックアプリ</h1>
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <span id="sync-status" class="sync-loading">⏳ 接続中</span>
     <span id="mode-badge" class="mode-edit">追加モード</span>
     <span id="gps-status">GPS: 未取得</span>
     <div id="track-controls">
@@ -639,19 +619,16 @@
   </div>
 </header>
 
-<!-- ===== モード切り替えバー ===== -->
 <div id="mode-bar" class="mode-edit">
   <button class="mode-btn active-edit"  id="btn-mode-edit"    onclick="setMode('edit')">📍 追加モード</button>
   <div style="width:1px;background:#e2e8f0;margin:6px 0;"></div>
   <button class="mode-btn"              id="btn-mode-collect" onclick="setMode('collect')">🚛 回収モード</button>
 </div>
 
-<!-- ===== メインレイアウト ===== -->
 <div class="main">
 
   <div id="map" class="mode-edit"></div>
 
-  <!-- ===== サイドパネル ===== -->
   <div id="side-panel">
 
     <div class="tab-bar">
@@ -659,30 +636,25 @@
       <button class="tab-btn"        onclick="switchTab('report', event)">📊 レポート</button>
     </div>
 
-    <!-- ===== 初期設定バー ===== -->
     <div class="default-bar">
       <button class="btn-default btn-save-default"  onclick="saveAsDefault()">⭐ 初期設定を登録</button>
-      <button class="btn-default btn-reset-default" onclick="resetToDefault()" id="btn-reset-default">↩ 初期設定に戻す</button>
+      <button class="btn-default btn-reset-default" onclick="resetToDefault()" id="btn-reset-default" disabled>↩ 初期設定に戻す</button>
+      <button class="btn-default btn-export-csv"    onclick="exportCsv()">📥 CSVエクスポート</button>
     </div>
 
-    <!-- ===== 一覧タブ ===== -->
     <div id="tab-list" class="tab-content active">
 
-      <!-- モードごとのヒント -->
       <div id="mode-hint" class="mode-hint hint-edit">
         <strong>📍 追加モード</strong>
         フォルダを選択し、地図をクリックしてチェックポイントを追加してください。
       </div>
 
-      <!-- 追加先フォルダ選択（追加モードのみ表示） -->
       <div id="folder-selector-wrap">
         <label>📁 追加先フォルダ</label>
         <select id="folder-selector" onchange="activeFolderId = parseInt(this.value); renderList();">
-          <!-- renderList() で動的に生成 -->
         </select>
       </div>
 
-      <!-- 全体進捗バー -->
       <div class="progress-wrap">
         <div class="progress-label">
           <span>全体進捗</span>
@@ -693,12 +665,10 @@
         </div>
       </div>
 
-      <!-- フォルダ別チェックポイント一覧（動的生成） -->
       <div id="folder-list"></div>
 
     </div>
 
-    <!-- ===== レポートタブ ===== -->
     <div id="tab-report" class="tab-content">
       <div class="report-header">
         <h3>点検レポート</h3>
@@ -710,10 +680,9 @@
            style="font-size:0.72rem;color:#a0aec0;text-align:right;margin-top:4px;"></div>
     </div>
 
-  </div><!-- /side-panel -->
-</div><!-- /main -->
+  </div>
+</div>
 
-<!-- ===== チェックポイント名・フォルダ名入力モーダル ===== -->
 <div class="modal-overlay" id="modal">
   <div class="modal-box">
     <h3 id="modal-title">名前を入力</h3>
@@ -725,13 +694,45 @@
   </div>
 </div>
 
-<!-- ===== トースト通知 ===== -->
 <div id="toast"></div>
 
 <script>
 /* ================================================================
-   フォルダデータ（15個をあらかじめ作成）
-   各フォルダ: { id, name, collapsed }
+   Firebase 初期化
+   ================================================================ */
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDOB1iOZ_8FWZKBBfDVqiMWh0EL10IHG9s",
+  authDomain: "patrol-app-01.firebaseapp.com",
+  projectId: "patrol-app-01",
+  storageBucket: "patrol-app-01.firebasestorage.app",
+  messagingSenderId: "730994188531",
+  appId: "1:730994188531:web:1b235c33be2f9c957b5786",
+  measurementId: "G-ZXYWCGSTEV"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const SHARED_DOC = db.collection('patrol').doc('shared');
+
+// Firestoreから受信したデータを適用中の場合、書き戻しを防ぐフラグ
+let isApplyingRemoteData = false;
+
+
+/* ================================================================
+   同期ステータス表示
+   ================================================================ */
+
+function setSyncStatus(text, state) {
+  const el = document.getElementById('sync-status');
+  if (!el) return;
+  el.textContent = text;
+  el.className = state === 'ok' ? 'sync-ok' : state === 'error' ? 'sync-error' : 'sync-loading';
+}
+
+
+/* ================================================================
+   フォルダデータ
    ================================================================ */
 
 const DEFAULT_FOLDER_NAMES = [
@@ -740,7 +741,6 @@ const DEFAULT_FOLDER_NAMES = [
   '周陽','桜木','城ケ丘','花陽','山間','その他',
 ];
 
-// デフォルトのフォルダ定義（ストレージにデータがない場合に使用）
 function createDefaultFolders() {
   return DEFAULT_FOLDER_NAMES.map((name, i) => ({
     id: i + 1,
@@ -751,14 +751,11 @@ function createDefaultFolders() {
 }
 
 let folders = createDefaultFolders();
-
-// 現在追加先として選択されているフォルダのID
 let activeFolderId = 1;
 
 
 /* ================================================================
    チェックポイントデータ
-   各ポイント: { id, name, lat, lng, folderId, checked, checkedAt, marker, circle }
    ================================================================ */
 
 let checkpoints = [];
@@ -766,7 +763,7 @@ let nextId = 1;
 
 
 /* ================================================================
-   モード・GPS関連の変数
+   モード・GPS関連
    ================================================================ */
 
 let currentMode = 'edit';
@@ -776,17 +773,13 @@ let gpsWatchId  = null;
 let gpsMarker   = null;
 let gpsCircle   = null;
 
-// チェックポイントへの接触開始時刻 (key: cp.id, value: Date.now())
 let contactStartTimes = {};
 
-// 走行軌跡
-let trackPoints    = [];   // { lat, lng, ts }
+let trackPoints    = [];
 let trackPolyline  = null;
 let trackVisible   = true;
-const TRACK_MIN_DIST = 3; // 3m以上動いた場合のみ記録
+const TRACK_MIN_DIST = 3;
 
-// モーダルの用途を示す変数
-// 'add-point'（ポイント追加）, 'rename-point'（ポイント名変更）, 'rename-folder'（フォルダ名変更）
 let modalMode   = null;
 let pendingLat  = null;
 let pendingLng  = null;
@@ -807,13 +800,190 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r
   maxZoom: 19,
 }).addTo(map);
 
-// 追加モードのときのみ地図クリックでポイント追加
 map.on('click', function (e) {
   if (currentMode !== 'edit') return;
   pendingLat = e.latlng.lat;
   pendingLng = e.latlng.lng;
   openModal('add-point');
 });
+
+
+/* ================================================================
+   ローカルチェック状態の保存・読み込み（端末ごとに独立）
+   ================================================================ */
+
+function saveLocalCheckStates() {
+  const states = {};
+  checkpoints.forEach(cp => {
+    if (cp.checked || cp.checkedAt) {
+      states[cp.id] = { checked: cp.checked, checkedAt: cp.checkedAt };
+    }
+  });
+  localStorage.setItem('patrol_check_states', JSON.stringify(states));
+}
+
+function loadLocalCheckStates() {
+  try {
+    const raw = localStorage.getItem('patrol_check_states');
+    if (raw) return JSON.parse(raw);
+    // 旧フォーマット（patrol_checkpoints）からのマイグレーション
+    const oldRaw = localStorage.getItem('patrol_checkpoints');
+    if (oldRaw) {
+      const states = {};
+      JSON.parse(oldRaw).forEach(cp => {
+        if (cp.checked) states[cp.id] = { checked: cp.checked, checkedAt: cp.checkedAt };
+      });
+      return states;
+    }
+  } catch(e) {}
+  return {};
+}
+
+
+/* ================================================================
+   Firestore への共有データ保存（フォルダ + チェックポイント定義）
+   チェック状態は保存しない（端末ごとにローカル管理）
+   ================================================================ */
+
+async function saveSharedData() {
+  if (isApplyingRemoteData) return;
+  const cpDefs = checkpoints.map(({ id, name, lat, lng, folderId }) =>
+    ({ id, name, lat, lng, folderId })
+  );
+  const folderDefs = folders.map(({ id, name, collapsed, visible }) =>
+    ({ id, name, collapsed: collapsed || false, visible: visible !== false })
+  );
+  try {
+    setSyncStatus('⏳ 保存中…', 'loading');
+    await SHARED_DOC.set({ folders: folderDefs, checkpoints: cpDefs, nextId }, { merge: true });
+    setSyncStatus('✅ 同期済', 'ok');
+  } catch(e) {
+    console.error('Firestore保存エラー:', e);
+    setSyncStatus('❌ 保存失敗', 'error');
+    showToast('❌ クラウドへの保存に失敗しました');
+  }
+}
+
+// チェック状態のみローカル保存。配置変更はFirestoreへ。
+function saveToStorage() {
+  saveLocalCheckStates();
+  saveSharedData();
+}
+
+
+/* ================================================================
+   Firestore リアルタイムリスナー
+   ================================================================ */
+
+function startFirestoreListener() {
+  setSyncStatus('⏳ 接続中…', 'loading');
+  SHARED_DOC.onSnapshot(
+    doc => {
+      if (!doc.exists) {
+        // 初回：Firestoreにデータなし → ローカルから読み込み
+        loadFromLocalStorage();
+        setSyncStatus('✅ 同期済', 'ok');
+        return;
+      }
+      applySharedData(doc.data());
+      setSyncStatus('✅ 同期済', 'ok');
+    },
+    err => {
+      console.error('Firestoreリスナーエラー:', err);
+      setSyncStatus('❌ 接続失敗', 'error');
+      showToast('❌ クラウド接続に失敗。ローカルデータを使用します。');
+      loadFromLocalStorage();
+    }
+  );
+}
+
+/* ================================================================
+   Firestoreのデータをアプリに適用
+   チェック状態はローカルストレージから復元してマージ
+   ================================================================ */
+
+function applySharedData(data) {
+  isApplyingRemoteData = true;
+
+  const localStates = loadLocalCheckStates();
+
+  if (data.folders && data.folders.length > 0) {
+    folders = data.folders;
+  }
+
+  // 既存マーカーを削除
+  checkpoints.forEach(cp => {
+    if (cp.marker) map.removeLayer(cp.marker);
+    if (cp.circle) map.removeLayer(cp.circle);
+  });
+  checkpoints = [];
+  contactStartTimes = {};
+
+  if (data.nextId) nextId = data.nextId;
+
+  // Firestore定義 + ローカルチェック状態でチェックポイントを再構築
+  (data.checkpoints || []).forEach(d => {
+    const state = localStates[d.id] || { checked: false, checkedAt: null };
+    const marker = L.marker([d.lat, d.lng], { icon: makeIcon(state.checked) })
+      .addTo(map)
+      .bindPopup(`<b>${escHtml(d.name)}</b><br><small>${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}</small>`);
+    marker.on('click', function() { this.openPopup(); });
+    const circle = L.circle([d.lat, d.lng], {
+      radius: 5, color: '#3182ce', fillColor: '#3182ce', fillOpacity: 0.08, weight: 1.5,
+    }).addTo(map);
+    const cp = { ...d, checked: state.checked || false, checkedAt: state.checkedAt || null, marker, circle };
+    checkpoints.push(cp);
+    const folder = folders.find(f => f.id === cp.folderId);
+    if (folder && folder.visible === false) setCheckpointMapVisibility(cp, false);
+  });
+
+  renderList();
+  renderReport();
+  isApplyingRemoteData = false;
+}
+
+/* ================================================================
+   ローカルストレージからの読み込み（Firestore接続失敗時のフォールバック）
+   ================================================================ */
+
+function loadFromLocalStorage() {
+  const rawFolders = localStorage.getItem('patrol_folders');
+  if (rawFolders) {
+    try {
+      const saved = JSON.parse(rawFolders);
+      folders = createDefaultFolders().map(def => {
+        const found = saved.find(s => s.id === def.id);
+        if (!found) return def;
+        const isOldDefault = /^コース\d+$/.test(found.name);
+        return { ...def, ...found, name: isOldDefault ? def.name : found.name };
+      });
+    } catch(e) {}
+  }
+
+  const localStates = loadLocalCheckStates();
+  const rawCp = localStorage.getItem('patrol_checkpoints');
+  if (!rawCp) return;
+  try {
+    const data = JSON.parse(rawCp);
+    nextId = parseInt(localStorage.getItem('patrol_next_id') || '1');
+    data.forEach(d => {
+      const state = localStates[d.id] || { checked: d.checked || false, checkedAt: d.checkedAt || null };
+      const marker = L.marker([d.lat, d.lng], { icon: makeIcon(state.checked) })
+        .addTo(map)
+        .bindPopup(`<b>${escHtml(d.name)}</b><br><small>${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}</small>`);
+      marker.on('click', function() { this.openPopup(); });
+      const circle = L.circle([d.lat, d.lng], {
+        radius: 5, color: '#3182ce', fillColor: '#3182ce', fillOpacity: 0.08, weight: 1.5,
+      }).addTo(map);
+      const cp = { ...d, folderId: d.folderId || 1, checked: state.checked, checkedAt: state.checkedAt, marker, circle };
+      checkpoints.push(cp);
+      const folder = folders.find(f => f.id === cp.folderId);
+      if (folder && folder.visible === false) setCheckpointMapVisibility(cp, false);
+    });
+  } catch(e) {
+    console.warn('ローカルデータの読み込みに失敗:', e);
+  }
+}
 
 
 /* ================================================================
@@ -842,7 +1012,7 @@ function setMode(mode) {
     hintEl.innerHTML     =
       '<strong>📍 追加モード</strong>' +
       'フォルダを選択し、地図をクリックしてチェックポイントを追加してください。';
-    selectorWrap.style.display = ''; // フォルダ選択を表示
+    selectorWrap.style.display = '';
   } else {
     modeBar.className    = 'mode-collect';
     mapEl.className      = 'mode-collect';
@@ -854,7 +1024,7 @@ function setMode(mode) {
     hintEl.innerHTML     =
       '<strong>🚛 回収モード</strong>' +
       'GPSで5m以内に近づくと自動チェックされます。手動操作も可能です。';
-    selectorWrap.style.display = 'none'; // フォルダ選択を非表示
+    selectorWrap.style.display = 'none';
   }
 
   renderList();
@@ -886,7 +1056,6 @@ function makeIcon(checked) {
 
 /* ================================================================
    モーダル管理
-   type: 'add-point' | 'rename-point' | 'rename-folder'
    ================================================================ */
 
 function openModal(type) {
@@ -895,8 +1064,7 @@ function openModal(type) {
   const input   = document.getElementById('modal-input');
 
   if (type === 'add-point') {
-    const folderName = (folders.find(f => f.id === activeFolderId) || {}).name || '';
-    titleEl.textContent  = `📍 チェックポイント名を入力`;
+    titleEl.textContent  = '📍 チェックポイント名を入力';
     input.placeholder    = '例: A号地、〇〇公園前など';
     input.value          = '';
   } else if (type === 'rename-point') {
@@ -963,7 +1131,6 @@ function addCheckpoint(name, lat, lng, folderId) {
     .bindPopup(`<b>${escHtml(name)}</b><br><small>${lat.toFixed(5)}, ${lng.toFixed(5)}</small>`);
   marker.on('click', function() { this.openPopup(); });
 
-  // 自動チェック範囲（5m）を薄い円で表示
   const circle = L.circle([lat, lng], {
     radius: 5, color: '#3182ce',
     fillColor: '#3182ce', fillOpacity: 0.08, weight: 1.5,
@@ -973,7 +1140,7 @@ function addCheckpoint(name, lat, lng, folderId) {
 
   renderList();
   renderReport();
-  saveToStorage();
+  saveSharedData(); // 配置変更 → Firestore
 }
 
 
@@ -993,11 +1160,11 @@ function applyRenamePoint(id, newName) {
   cp.marker.setPopupContent(
     `<b>${escHtml(newName)}</b><br><small>${cp.lat.toFixed(5)}, ${cp.lng.toFixed(5)}</small>`
   );
-  renderList(); renderReport(); saveToStorage();
+  renderList(); renderReport(); saveSharedData();
 }
 
 function startRenameFolder(folderId, e) {
-  e.stopPropagation(); // フォルダの開閉クリックと競合しないようにする
+  e.stopPropagation();
   renamingFolderId = folderId;
   openModal('rename-folder');
 }
@@ -1006,7 +1173,7 @@ function applyRenameFolder(folderId, newName) {
   const folder = folders.find(f => f.id === folderId);
   if (!folder) return;
   folder.name = newName;
-  renderList(); renderReport(); saveToStorage();
+  renderList(); renderReport(); saveSharedData();
 }
 
 
@@ -1019,7 +1186,7 @@ function toggleFolder(folderId) {
   if (!folder) return;
   folder.collapsed = !folder.collapsed;
   renderList();
-  saveToStorage();
+  saveSharedData();
 }
 
 
@@ -1036,7 +1203,7 @@ function toggleFolderVisibility(folderId, e) {
     setCheckpointMapVisibility(cp, folder.visible);
   });
   renderList();
-  saveToStorage();
+  saveSharedData();
 }
 
 function setCheckpointMapVisibility(cp, visible) {
@@ -1050,6 +1217,7 @@ function setCheckpointMapVisibility(cp, visible) {
 
 /* ================================================================
    チェック・アンチェック・削除・フォーカス
+   チェック状態は端末ごとのローカル管理のため localStorage のみ更新
    ================================================================ */
 
 function checkPoint(id, isAuto) {
@@ -1059,7 +1227,8 @@ function checkPoint(id, isAuto) {
   cp.checkedAt = new Date().toLocaleString('ja-JP');
   cp.marker.setIcon(makeIcon(true));
   if (isAuto) showToast(`✅ 自動チェック: ${cp.name}`);
-  renderList(); renderReport(); saveToStorage();
+  renderList(); renderReport();
+  saveLocalCheckStates(); // チェック状態はローカルのみ
 }
 
 function uncheckPoint(id) {
@@ -1069,7 +1238,8 @@ function uncheckPoint(id) {
   cp.checkedAt = null;
   cp.marker.setIcon(makeIcon(false));
   delete contactStartTimes[id];
-  renderList(); renderReport(); saveToStorage();
+  renderList(); renderReport();
+  saveLocalCheckStates(); // チェック状態はローカルのみ
 }
 
 function deletePoint(id) {
@@ -1079,7 +1249,7 @@ function deletePoint(id) {
   map.removeLayer(checkpoints[idx].circle);
   delete contactStartTimes[id];
   checkpoints.splice(idx, 1);
-  renderList(); renderReport(); saveToStorage();
+  renderList(); renderReport(); saveSharedData();
 }
 
 function focusPoint(id) {
@@ -1089,21 +1259,20 @@ function focusPoint(id) {
   cp.marker.openPopup();
 }
 
+
 /* ================================================================
-   フォルダの上下移動（dir: -1=上へ / +1=下へ）
+   フォルダの上下移動
    ================================================================ */
 
 function moveFolder(folderId, dir, e) {
-  e.stopPropagation(); // フォルダ開閉クリックと競合しないようにする
+  e.stopPropagation();
   const idx     = folders.findIndex(f => f.id === folderId);
   const swapIdx = idx + dir;
   if (swapIdx < 0 || swapIdx >= folders.length) return;
-  // 配列内の要素を入れ替える
   [folders[idx], folders[swapIdx]] = [folders[swapIdx], folders[idx]];
-  renderList();
-  renderReport();
-  saveToStorage();
+  renderList(); renderReport(); saveSharedData();
 }
+
 
 /* ================================================================
    チェックポイントの上下移動（同一フォルダ内）
@@ -1113,25 +1282,21 @@ function moveCheckpoint(cpId, dir) {
   const cp        = checkpoints.find(c => c.id === cpId);
   if (!cp) return;
 
-  // 同一フォルダのポイントだけを現在の順序で取り出す
   const folderCps  = checkpoints.filter(c => c.folderId === cp.folderId);
   const localIdx   = folderCps.findIndex(c => c.id === cpId);
   const swapLocal  = localIdx + dir;
   if (swapLocal < 0 || swapLocal >= folderCps.length) return;
 
-  // checkpoints 配列内の実際のインデックスを求めて入れ替える
   const idx1 = checkpoints.findIndex(c => c.id === folderCps[localIdx].id);
   const idx2 = checkpoints.findIndex(c => c.id === folderCps[swapLocal].id);
   [checkpoints[idx1], checkpoints[idx2]] = [checkpoints[idx2], checkpoints[idx1]];
 
-  renderList();
-  renderReport();
-  saveToStorage();
+  renderList(); renderReport(); saveSharedData();
 }
 
 
 /* ================================================================
-   一覧UIのレンダリング（フォルダ別にグループ化）
+   一覧UIのレンダリング
    ================================================================ */
 
 function renderList() {
@@ -1139,21 +1304,17 @@ function renderList() {
   const totalAll = checkpoints.filter(c => visibleFolderIds.has(c.folderId)).length;
   const doneAll  = checkpoints.filter(c => visibleFolderIds.has(c.folderId) && c.checked).length;
 
-  // 全体進捗バーを更新
   document.getElementById('progress-text').textContent = `${doneAll} / ${totalAll}`;
   const pct = totalAll > 0 ? Math.round(doneAll / totalAll * 100) : 0;
   document.getElementById('progress-bar').style.width = pct + '%';
 
-  // フォルダ選択ドロップダウンを更新（追加モード用）
   const sel = document.getElementById('folder-selector');
   const prevVal = sel.value ? parseInt(sel.value) : activeFolderId;
   sel.innerHTML = folders.map(f =>
     `<option value="${f.id}" ${f.id === prevVal ? 'selected' : ''}>${escHtml(f.name)}</option>`
   ).join('');
-  // 選択値をactiveFolderIdに反映する
   activeFolderId = parseInt(sel.value) || activeFolderId;
 
-  // フォルダ別にチェックポイントカードを生成する
   const container = document.getElementById('folder-list');
   container.innerHTML = '';
 
@@ -1163,7 +1324,6 @@ function renderList() {
     const total     = folderCps.length;
     const allDone   = total > 0 && done === total;
 
-    // フォルダセクション要素を生成
     const isVisible = folder.visible !== false;
     const section = document.createElement('div');
     section.className =
@@ -1172,7 +1332,6 @@ function renderList() {
       (!isVisible ? ' folder-hidden' : '') +
       (folder.id === activeFolderId && currentMode === 'edit' ? ' active-folder' : '');
 
-    // 追加モード時のフォルダ操作ボタン（上下移動・名前変更）
     const folderIdx     = folders.findIndex(f => f.id === folder.id);
     const folderEditBtns = currentMode === 'edit'
       ? `<button class="btn-move"
@@ -1185,14 +1344,12 @@ function renderList() {
            onclick="startRenameFolder(${folder.id}, event)">名前変更</button>`
       : '';
 
-    // 表示/非表示ボタン（常に表示）
     const visBtn = `<button class="btn-folder-visible${isVisible ? '' : ' is-hidden'}"
         onclick="toggleFolderVisibility(${folder.id}, event)"
         title="${isVisible ? 'クリックで非表示' : 'クリックで表示'}">
         ${isVisible ? '👁 表示' : '🚫 非表示'}
       </button>`;
 
-    // フォルダヘッダーHTML
     section.innerHTML = `
       <div class="folder-header" onclick="toggleFolder(${folder.id})">
         <span class="folder-icon">📁</span>
@@ -1208,11 +1365,9 @@ function renderList() {
 
     container.appendChild(section);
 
-    // フォルダ内のチェックポイントカードを生成する
     const contentEl = document.getElementById(`folder-content-${folder.id}`);
 
     if (folderCps.length === 0) {
-      // チェックポイントがない場合のメッセージ
       contentEl.innerHTML =
         `<div class="folder-empty">${
           currentMode === 'edit'
@@ -1226,10 +1381,8 @@ function renderList() {
           (cp.checked ? ' checked' : '') +
           (!isVisible ? ' card-disabled' : '');
 
-        // モードに応じてボタンを切り替える
         let actions = '';
         if (currentMode === 'edit') {
-          // 同一フォルダ内での順番（先頭・末尾は対応するボタンを無効化）
           const cpLocalIdx  = folderCps.findIndex(c => c.id === cp.id);
           const isFirstCp   = cpLocalIdx === 0;
           const isLastCp    = cpLocalIdx === folderCps.length - 1;
@@ -1268,11 +1421,10 @@ function renderList() {
 
 
 /* ================================================================
-   レポートUIのレンダリング（フォルダ別に集計）
+   レポートUIのレンダリング
    ================================================================ */
 
 function renderReport() {
-  // 有効（表示中）フォルダのIDセット
   const visibleFolderIds = new Set(folders.filter(f => f.visible !== false).map(f => f.id));
   const activeCps = checkpoints.filter(cp => visibleFolderIds.has(cp.folderId));
 
@@ -1280,7 +1432,6 @@ function renderReport() {
   const doneAll  = activeCps.filter(c => c.checked).length;
   const pct      = totalAll > 0 ? Math.round(doneAll / totalAll * 100) : 0;
 
-  // 全体サマリー（非表示フォルダ分を除外）
   document.getElementById('report-summary').innerHTML = `
     <div class="summary-item">
       <div class="summary-value">${totalAll}</div>
@@ -1299,20 +1450,18 @@ function renderReport() {
       <div class="summary-label">達成率</div>
     </div>`;
 
-  // フォルダごとにまとめて表示する（非表示フォルダはスキップ）
   const list = document.getElementById('report-list');
   list.innerHTML = '';
 
   folders.forEach(folder => {
-    if (folder.visible === false) return; // 非表示フォルダはレポートに出さない
+    if (folder.visible === false) return;
     const folderCps = checkpoints.filter(c => c.folderId === folder.id);
-    if (folderCps.length === 0) return; // ポイントがないフォルダはスキップ
+    if (folderCps.length === 0) return;
 
     const done   = folderCps.filter(c => c.checked).length;
     const total  = folderCps.length;
     const allDone = done === total;
 
-    // フォルダグループのコンテナ
     const group = document.createElement('div');
     group.className = 'report-folder-group';
     group.innerHTML = `
@@ -1321,7 +1470,6 @@ function renderReport() {
         <span class="rfolder-badge ${allDone ? 'all-done' : ''}">${done}/${total}</span>
       </div>`;
 
-    // フォルダ内の各ポイントの行を追加
     folderCps.forEach((cp, i) => {
       const row = document.createElement('div');
       row.className = 'report-row' + (cp.checked ? ' checked' : '');
@@ -1391,10 +1539,9 @@ function onGpsSuccess(pos) {
   } else {
     gpsMarker.setLatLng([currentLat, currentLng]);
     gpsCircle.setLatLng([currentLat, currentLng]);
-    gpsCircle.setRadius(5); // 常に5m固定
+    gpsCircle.setRadius(5);
   }
 
-  // 軌跡に追加（前の点から TRACK_MIN_DIST 以上移動した場合のみ）
   const last = trackPoints[trackPoints.length - 1];
   const movedEnough = !last ||
     getDistanceMeters(currentLat, currentLng, last.lat, last.lng) >= TRACK_MIN_DIST;
@@ -1404,25 +1551,23 @@ function onGpsSuccess(pos) {
     saveTrackToStorage();
   }
 
-  // 自動チェックは回収モードのときのみ
   if (currentMode !== 'collect') return;
   const now = Date.now();
   checkpoints.forEach(cp => {
     if (cp.checked) return;
-    // 非表示フォルダのチェックポイントはスキップ
     const folder = folders.find(f => f.id === cp.folderId);
     if (folder && folder.visible === false) return;
 
     const inRange = getDistanceMeters(currentLat, currentLng, cp.lat, cp.lng) <= 5;
     if (inRange) {
       if (!contactStartTimes[cp.id]) {
-        contactStartTimes[cp.id] = now; // 接触開始を記録
+        contactStartTimes[cp.id] = now;
       } else if (now - contactStartTimes[cp.id] >= 5000) {
         checkPoint(cp.id, true);
         delete contactStartTimes[cp.id];
       }
     } else {
-      delete contactStartTimes[cp.id]; // 範囲外に出たらリセット
+      delete contactStartTimes[cp.id];
     }
   });
 }
@@ -1441,7 +1586,7 @@ function setGpsStatus(text, cls) {
 
 
 /* ================================================================
-   走行軌跡の管理
+   走行軌跡の管理（端末ごとのローカル管理）
    ================================================================ */
 
 function updateTrackPolyline() {
@@ -1449,10 +1594,7 @@ function updateTrackPolyline() {
 
   if (!trackPolyline) {
     trackPolyline = L.polyline(latlngs, {
-      color: '#e53e3e',
-      weight: 3,
-      opacity: 0.75,
-      lineJoin: 'round',
+      color: '#e53e3e', weight: 3, opacity: 0.75, lineJoin: 'round',
     }).addTo(map);
   } else {
     trackPolyline.setLatLngs(latlngs);
@@ -1481,13 +1623,12 @@ function clearTrack() {
 }
 
 function saveTrackToStorage() {
-  // 容量節約のため小数点5桁に丸めて保存
   const slim = trackPoints.map(p => [
     Math.round(p.lat * 1e5) / 1e5,
     Math.round(p.lng * 1e5) / 1e5,
     p.ts,
   ]);
-  try { localStorage.setItem('patrol_track', JSON.stringify(slim)); } catch(e) { /* 容量超過は無視 */ }
+  try { localStorage.setItem('patrol_track', JSON.stringify(slim)); } catch(e) {}
 }
 
 function loadTrackFromStorage() {
@@ -1497,7 +1638,7 @@ function loadTrackFromStorage() {
     const data = JSON.parse(raw);
     trackPoints = data.map(p => ({ lat: p[0], lng: p[1], ts: p[2] }));
     if (trackPoints.length > 0) updateTrackPolyline();
-  } catch(e) { /* 読み込み失敗は無視 */ }
+  } catch(e) {}
 }
 
 
@@ -1531,7 +1672,7 @@ function showToast(msg) {
 
 
 /* ================================================================
-   XSS対策: HTML特殊文字をエスケープする
+   XSS対策
    ================================================================ */
 
 function escHtml(str) {
@@ -1542,132 +1683,102 @@ function escHtml(str) {
 
 
 /* ================================================================
-   localStorage によるデータ永続化
+   初期設定の登録・復元（Firestore保存）
    ================================================================ */
 
-function saveToStorage() {
-  localStorage.setItem('patrol_folders', JSON.stringify(folders));
-  const cpData = checkpoints.map(({ id, name, lat, lng, folderId, checked, checkedAt }) =>
-    ({ id, name, lat, lng, folderId, checked, checkedAt })
-  );
-  localStorage.setItem('patrol_checkpoints', JSON.stringify(cpData));
-  localStorage.setItem('patrol_next_id', String(nextId));
-}
-
-/* ================================================================
-   初期設定の登録・復元
-   ================================================================ */
-
-function saveAsDefault() {
+async function saveAsDefault() {
   if (!confirm('現在のチェックポイント配置を初期設定として登録しますか？\n（チェック状態はリセットして保存されます）')) return;
 
-  // チェック状態をリセットしたスナップショットを初期設定として保存
   const cpSnap = checkpoints.map(({ id, name, lat, lng, folderId }) =>
-    ({ id, name, lat, lng, folderId, checked: false, checkedAt: null })
+    ({ id, name, lat, lng, folderId })
   );
-  localStorage.setItem('patrol_default_folders',     JSON.stringify(folders));
-  localStorage.setItem('patrol_default_checkpoints', JSON.stringify(cpSnap));
-  localStorage.setItem('patrol_default_next_id',     String(nextId));
+  const folderSnap = folders.map(({ id, name, collapsed, visible }) =>
+    ({ id, name, collapsed: collapsed || false, visible: visible !== false })
+  );
 
-  updateResetButton();
-  showToast('⭐ 初期設定を登録しました');
+  try {
+    setSyncStatus('⏳ 保存中…', 'loading');
+    await SHARED_DOC.set({
+      defaultFolders:     folderSnap,
+      defaultCheckpoints: cpSnap,
+      defaultNextId:      nextId,
+    }, { merge: true });
+    setSyncStatus('✅ 同期済', 'ok');
+    updateResetButton();
+    showToast('⭐ 初期設定を登録しました');
+  } catch(e) {
+    setSyncStatus('❌ 保存失敗', 'error');
+    showToast('❌ 初期設定の登録に失敗しました');
+  }
 }
 
-function resetToDefault() {
+async function resetToDefault() {
   if (!confirm('初期設定に戻しますか？\n現在の全チェック状態とポイント変更がリセットされます。')) return;
 
-  const rawFolders = localStorage.getItem('patrol_default_folders');
-  const rawCp      = localStorage.getItem('patrol_default_checkpoints');
-  if (!rawFolders || !rawCp) { showToast('⚠️ 初期設定が登録されていません'); return; }
-
-  // 既存マーカーを地図から削除
-  checkpoints.forEach(cp => {
-    if (cp.marker) map.removeLayer(cp.marker);
-    if (cp.circle) map.removeLayer(cp.circle);
-  });
-  checkpoints = [];
-  contactStartTimes = {};
-
-  // 初期設定フォルダを復元
-  try { folders = JSON.parse(rawFolders); } catch(e) {}
-
-  // 初期設定チェックポイントを復元
   try {
-    const data = JSON.parse(rawCp);
-    nextId = parseInt(localStorage.getItem('patrol_default_next_id') || '1');
-    data.forEach(d => {
-      const marker = L.marker([d.lat, d.lng], { icon: makeIcon(false) })
-        .addTo(map)
-        .bindPopup(`<b>${escHtml(d.name)}</b><br><small>${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}</small>`);
-      marker.on('click', function() { this.openPopup(); });
-      const circle = L.circle([d.lat, d.lng], {
-        radius: 5, color: '#3182ce', fillColor: '#3182ce', fillOpacity: 0.08, weight: 1.5,
-      }).addTo(map);
-      const cp = { ...d, folderId: d.folderId || 1, marker, circle };
-      checkpoints.push(cp);
-      const folder = folders.find(f => f.id === cp.folderId);
-      if (folder && folder.visible === false) setCheckpointMapVisibility(cp, false);
-    });
-  } catch(e) { console.warn('初期設定の読み込みに失敗:', e); }
+    const snap = await SHARED_DOC.get();
+    if (!snap.exists || !snap.data().defaultCheckpoints) {
+      showToast('⚠️ 初期設定が登録されていません'); return;
+    }
+    const data = snap.data();
 
-  saveToStorage();
-  renderList();
-  renderReport();
-  showToast('↩ 初期設定に戻しました');
-}
+    setSyncStatus('⏳ 保存中…', 'loading');
+    await SHARED_DOC.set({
+      folders:    data.defaultFolders,
+      checkpoints: data.defaultCheckpoints,
+      nextId:     data.defaultNextId,
+    }, { merge: true });
 
-function updateResetButton() {
-  const btn = document.getElementById('btn-reset-default');
-  if (btn) btn.disabled = !localStorage.getItem('patrol_default_checkpoints');
-}
-
-function loadFromStorage() {
-  // フォルダデータを復元する
-  const rawFolders = localStorage.getItem('patrol_folders');
-  if (rawFolders) {
-    try {
-      const saved = JSON.parse(rawFolders);
-      folders = createDefaultFolders().map(def => {
-        const found = saved.find(s => s.id === def.id);
-        if (!found) return def;
-        // 旧デフォルト名(コースN)のままなら新デフォルト名に更新
-        const isOldDefault = /^コース\d+$/.test(found.name);
-        return { ...def, ...found, name: isOldDefault ? def.name : found.name };
-      });
-    } catch(e) { /* 読み込み失敗時はデフォルトのまま */ }
-  }
-
-  // チェックポイントデータを復元する（なければ初期設定から）
-  const rawCp = localStorage.getItem('patrol_checkpoints')
-             || localStorage.getItem('patrol_default_checkpoints');
-  if (!rawCp) return;
-  try {
-    const data = JSON.parse(rawCp);
-    nextId = parseInt(localStorage.getItem('patrol_next_id') || '1');
-    data.forEach(d => {
-      const marker = L.marker([d.lat, d.lng], { icon: makeIcon(d.checked) })
-        .addTo(map)
-        .bindPopup(`<b>${escHtml(d.name)}</b><br><small>${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}</small>`);
-      marker.on('click', function() { this.openPopup(); });
-
-      const circle = L.circle([d.lat, d.lng], {
-        radius: 5, color: '#3182ce',
-        fillColor: '#3182ce', fillOpacity: 0.08, weight: 1.5,
-      }).addTo(map);
-
-      // 旧データ互換性: folderIdがなければフォルダ1に割り当てる
-      const cp = { ...d, folderId: d.folderId || 1, marker, circle };
-      checkpoints.push(cp);
-
-      // フォルダが非表示なら地図上のマーカーも隠す
-      const folder = folders.find(f => f.id === cp.folderId);
-      if (folder && folder.visible === false) {
-        setCheckpointMapVisibility(cp, false);
-      }
-    });
+    // 全端末のチェック状態はローカルなので、自端末分のみクリア
+    localStorage.removeItem('patrol_check_states');
+    setSyncStatus('✅ 同期済', 'ok');
+    showToast('↩ 初期設定に戻しました');
   } catch(e) {
-    console.warn('保存データの読み込みに失敗:', e);
+    setSyncStatus('❌ 保存失敗', 'error');
+    showToast('❌ 初期設定への復元に失敗しました');
   }
+}
+
+async function updateResetButton() {
+  const btn = document.getElementById('btn-reset-default');
+  if (!btn) return;
+  try {
+    const snap = await SHARED_DOC.get();
+    btn.disabled = !snap.exists || !snap.data()?.defaultCheckpoints;
+  } catch(e) {
+    btn.disabled = true;
+  }
+}
+
+
+/* ================================================================
+   CSVエクスポート
+   ================================================================ */
+
+function exportCsv() {
+  if (checkpoints.length === 0) { showToast('⚠️ エクスポートするデータがありません'); return; }
+
+  const header = ['ID', 'フォルダ名', 'ポイント名', '緯度', '経度', 'チェック済', 'チェック日時'];
+  const rows = checkpoints.map(cp => {
+    const folderName = (folders.find(f => f.id === cp.folderId) || {}).name || '';
+    return [
+      cp.id, folderName, cp.name, cp.lat, cp.lng,
+      cp.checked ? '済' : '未',
+      cp.checkedAt || '',
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+  });
+
+  const bom = '\uFEFF';
+  const csv = bom + [header.join(','), ...rows].join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const now = new Date().toLocaleString('ja-JP').replace(/[/:]/g, '-').replace(/\s/g, '_');
+  a.href = url;
+  a.download = `checkpoints_${now}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('📥 CSVをダウンロードしました');
 }
 
 
@@ -1675,8 +1786,8 @@ function loadFromStorage() {
    アプリ起動処理
    ================================================================ */
 
-loadFromStorage();
-loadTrackFromStorage();
+startFirestoreListener(); // Firestoreからデータ読み込み＆リアルタイム同期開始
+loadTrackFromStorage();   // 軌跡はローカルから（端末固有）
 updateResetButton();
 startGPS();
 renderList();
