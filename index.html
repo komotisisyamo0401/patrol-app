@@ -421,6 +421,7 @@
     .btn-reset-default { background: #e2e8f0; color: #4a5568; }
     .btn-reset-default:disabled { opacity: 0.35; cursor: default; }
     .btn-export-csv { background: #2c7a7b; color: white; }
+    .btn-import-csv { background: #6b46c1; color: white; }
 
     .report-header {
       display: flex;
@@ -640,6 +641,8 @@
       <button class="btn-default btn-save-default"  onclick="saveAsDefault()">⭐ 初期設定を登録</button>
       <button class="btn-default btn-reset-default" onclick="resetToDefault()" id="btn-reset-default" disabled>↩ 初期設定に戻す</button>
       <button class="btn-default btn-export-csv"    onclick="exportCsv()">📥 CSVエクスポート</button>
+      <button class="btn-default btn-import-csv"    onclick="document.getElementById('csv-file-input').click()">📤 CSVインポート</button>
+      <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="importCsv(this)">
     </div>
 
     <div id="tab-list" class="tab-content active">
@@ -1779,6 +1782,102 @@ function exportCsv() {
   a.click();
   URL.revokeObjectURL(url);
   showToast('📥 CSVをダウンロードしました');
+}
+
+
+/* ================================================================
+   CSVインポート
+   列順: ID, フォルダ名, ポイント名, 緯度, 経度, チェック済, チェック日時
+   ================================================================ */
+
+function importCsv(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = ''; // 同じファイルを再選択できるようリセット
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const text = e.target.result.replace(/^\uFEFF/, ''); // BOM除去
+      const lines = text.split(/\r\n|\r|\n/).filter(l => l.trim());
+      if (lines.length < 2) { showToast('⚠️ データが見つかりません'); return; }
+
+      // ヘッダー行をスキップして各行をパース
+      const rows = lines.slice(1).map(parseCsvLine).filter(r => r.length >= 5);
+
+      if (rows.length === 0) { showToast('⚠️ 有効な行がありません'); return; }
+
+      // フォルダ名 → フォルダIDのマッピング（完全一致 → 部分一致 → その他フォルダ）
+      const fallbackFolder = folders[folders.length - 1];
+      const resolveFolder = (name) => {
+        const exact = folders.find(f => f.name === name);
+        if (exact) return exact.id;
+        const partial = folders.find(f => f.name.includes(name) || name.includes(f.name));
+        if (partial) return partial.id;
+        return fallbackFolder ? fallbackFolder.id : 1;
+      };
+
+      // インポート対象の確認サマリーを作成
+      const preview = rows.slice(0, 5).map(r => `・${r[1]}／${r[2]}`).join('\n');
+      const more = rows.length > 5 ? `\n… 他${rows.length - 5}件` : '';
+      if (!confirm(
+        `${rows.length}件のチェックポイントをインポートします。\n\n` +
+        `${preview}${more}\n\n` +
+        `既存のチェックポイントは残したまま追加されます。\n続行しますか？`
+      )) return;
+
+      // チェックポイントを追加（IDは新規採番、チェック状態は無視）
+      rows.forEach(r => {
+        const folderName = r[1];
+        const name       = r[2];
+        const lat        = parseFloat(r[3]);
+        const lng        = parseFloat(r[4]);
+
+        if (!name || isNaN(lat) || isNaN(lng)) return; // 不正行はスキップ
+
+        const folderId = resolveFolder(folderName);
+        const id = nextId++;
+        const marker = L.marker([lat, lng], { icon: makeIcon(false) })
+          .addTo(map)
+          .bindPopup(`<b>${escHtml(name)}</b><br><small>${lat.toFixed(5)}, ${lng.toFixed(5)}</small>`);
+        marker.on('click', function() { this.openPopup(); });
+        const circle = L.circle([lat, lng], {
+          radius: 5, color: '#3182ce', fillColor: '#3182ce', fillOpacity: 0.08, weight: 1.5,
+        }).addTo(map);
+        checkpoints.push({ id, name, lat, lng, folderId, checked: false, checkedAt: null, marker, circle });
+      });
+
+      renderList();
+      renderReport();
+      saveSharedData();
+      showToast(`✅ ${rows.length}件をインポートしました`);
+    } catch(err) {
+      console.error('CSVインポートエラー:', err);
+      showToast('❌ CSVの読み込みに失敗しました');
+    }
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+// CSVの1行をフィールド配列に分解（ダブルクォート対応）
+function parseCsvLine(line) {
+  const fields = [];
+  let cur = '';
+  let inQuote = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuote) {
+      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (ch === '"') { inQuote = false; }
+      else { cur += ch; }
+    } else {
+      if (ch === '"') { inQuote = true; }
+      else if (ch === ',') { fields.push(cur); cur = ''; }
+      else { cur += ch; }
+    }
+  }
+  fields.push(cur);
+  return fields;
 }
 
 
