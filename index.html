@@ -414,31 +414,6 @@
     .btn-delete  { background: #e2e8f0; color: #4a5568; }
     .btn-rename  { background: #e2e8f0; color: #4a5568; }
 
-    .default-bar {
-      display: flex;
-      gap: 6px;
-      padding: 8px 12px;
-      background: #fffbeb;
-      border-bottom: 1px solid #f6e05e;
-      flex-shrink: 0;
-      flex-wrap: wrap;
-    }
-    .btn-default {
-      flex: 1;
-      padding: 5px 8px;
-      border: none;
-      border-radius: 6px;
-      font-size: 0.76rem;
-      font-weight: 700;
-      cursor: pointer;
-      transition: opacity 0.2s;
-    }
-    .btn-default:hover { opacity: 0.82; }
-    .btn-save-default  { background: #d69e2e; color: white; }
-    .btn-reset-default { background: #e2e8f0; color: #4a5568; }
-    .btn-reset-default:disabled { opacity: 0.35; cursor: default; }
-    .btn-export-csv { background: #2c7a7b; color: white; }
-    .btn-import-csv { background: #6b46c1; color: white; }
 
     .report-header {
       display: flex;
@@ -704,6 +679,23 @@
       font-size: 0.76rem; font-weight: 600; cursor: pointer; flex-shrink: 0;
     }
     #btn-admin:hover { background: rgba(255,255,255,0.28); }
+    .admin-section-title {
+      font-size: 0.78rem; font-weight: 700; color: #718096;
+      text-transform: uppercase; letter-spacing: 0.04em;
+      margin-bottom: 6px; padding-bottom: 4px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .admin-action-row {
+      display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px;
+    }
+    .btn-admin-action {
+      padding: 7px 12px; border: 1px solid #cbd5e0; border-radius: 7px;
+      background: white; font-size: 0.82rem; cursor: pointer; color: #2d3748;
+      transition: background 0.15s;
+    }
+    .btn-admin-action:hover:not(:disabled) { background: #edf2f7; }
+    .btn-admin-action:disabled { opacity: 0.4; cursor: not-allowed; }
+
     #btn-change-vehicle {
       padding: 4px 10px;
       border: 1px solid rgba(255,255,255,0.5); border-radius: 8px;
@@ -724,7 +716,6 @@
     <div id="track-controls">
       <span id="track-info">軌跡: 0pt</span>
       <button class="btn-track btn-track-toggle" id="btn-track-toggle" onclick="toggleTrackVisibility()">表示中</button>
-      <button class="btn-track btn-track-clear" onclick="clearTrack()">軌跡クリア</button>
     </div>
     <button id="btn-change-vehicle" onclick="showVehicleSelect(true)" style="display:none">🚛 <span id="vehicle-label-header"></span></button>
     <button id="btn-admin" onclick="openAdminPanel()">🔧 管理者</button>
@@ -749,8 +740,31 @@
     <h2>🔧 管理者モード
       <button class="btn-admin-close" onclick="closeAdminPanel()">✕ 閉じる</button>
     </h2>
+
+    <!-- 端末管理 -->
+    <div class="admin-section-title">📡 稼働端末</div>
     <div id="admin-device-list">
       <div style="text-align:center;color:#a0aec0;padding:10px">端末情報を読み込み中…</div>
+    </div>
+
+    <!-- 軌跡 -->
+    <div class="admin-section-title" style="margin-top:14px">🗺️ 軌跡</div>
+    <div class="admin-action-row">
+      <button class="btn-admin-action" onclick="adminClearTrack()">🗑 自端末の軌跡をクリア</button>
+    </div>
+
+    <!-- チェックポイント設定 -->
+    <div class="admin-section-title" style="margin-top:14px">⚙️ チェックポイント設定</div>
+    <div class="admin-action-row">
+      <button class="btn-admin-action" onclick="saveAsDefault(); closeAdminPanel()">⭐ 初期設定を登録</button>
+      <button class="btn-admin-action" id="admin-btn-reset-default" onclick="resetToDefault()" disabled>↩ 初期設定に戻す</button>
+    </div>
+
+    <!-- CSV -->
+    <div class="admin-section-title" style="margin-top:14px">📄 CSV</div>
+    <div class="admin-action-row">
+      <button class="btn-admin-action" onclick="exportCsv()">📥 CSVエクスポート</button>
+      <button class="btn-admin-action" onclick="document.getElementById('csv-file-input').click()">📤 CSVインポート</button>
     </div>
   </div>
 </div>
@@ -772,13 +786,7 @@
       <button class="tab-btn"        onclick="switchTab('report', event)">📊 レポート</button>
     </div>
 
-    <div class="default-bar">
-      <button class="btn-default btn-save-default"  onclick="saveAsDefault()">⭐ 初期設定を登録</button>
-      <button class="btn-default btn-reset-default" onclick="resetToDefault()" id="btn-reset-default" disabled>↩ 初期設定に戻す</button>
-      <button class="btn-default btn-export-csv"    onclick="exportCsv()">📥 CSVエクスポート</button>
-      <button class="btn-default btn-import-csv"    onclick="document.getElementById('csv-file-input').click()">📤 CSVインポート</button>
-      <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="importCsv(this)">
-    </div>
+    <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="importCsv(this)">
 
     <div id="tab-list" class="tab-content active">
 
@@ -910,20 +918,29 @@ async function renderVehicleButtons() {
     });
   } catch(e) {}
 
+  // 車両リスト: フォルダ名+号（「その他」は除外）＋追加車両
+  const vehicleList = [
+    ...folders
+      .filter(f => f.name !== 'その他')
+      .map((f, i) => ({ name: f.name + '号', colorIdx: folders.indexOf(f) })),
+    { name: 'その他１号', colorIdx: 15 },
+    { name: 'その他２号', colorIdx: 15 },
+    { name: '管理者号',   colorIdx: 14 },
+  ];
+
   listEl.innerHTML = '';
-  folders.forEach((folder, idx) => {
-    const vehicleName = folder.name + '号';
-    const color = VEHICLE_COLORS[idx % VEHICLE_COLORS.length];
+  vehicleList.forEach(({ name: vehicleName, colorIdx }) => {
+    const color   = VEHICLE_COLORS[colorIdx % VEHICLE_COLORS.length];
     const isInUse = inUseSet.has(vehicleName) && vehicleName !== selectedVehicle;
 
     const btn = document.createElement('button');
     btn.className = 'vehicle-btn' + (isInUse ? ' in-use' : '');
-    btn.disabled = isInUse;
+    btn.disabled  = isInUse;
     btn.innerHTML = `
       <span class="vc-dot" style="background:${color}"></span>
       ${escHtml(vehicleName)}
       <span class="vc-status">${isInUse ? '使用中' : ''}</span>`;
-    btn.onclick = () => selectVehicle(vehicleName, idx);
+    btn.onclick = () => selectVehicle(vehicleName, colorIdx);
     listEl.appendChild(btn);
   });
 }
@@ -1068,6 +1085,19 @@ function saveLocalCheckStates() {
   localStorage.setItem('patrol_check_states', JSON.stringify(states));
 }
 
+async function saveCheckStatesToFirestore() {
+  if (isApplyingRemoteData) return;
+  const states = {};
+  checkpoints.forEach(cp => {
+    states[cp.id] = { checked: cp.checked || false, checkedAt: cp.checkedAt || null };
+  });
+  try {
+    await SHARED_DOC.set({ checkStates: states }, { merge: true });
+  } catch(e) {
+    console.warn('チェック状態のFirestore保存失敗:', e);
+  }
+}
+
 function loadLocalCheckStates() {
   try {
     const raw = localStorage.getItem('patrol_check_states');
@@ -1138,8 +1168,12 @@ function saveToStorage() {
 function applySharedData(data) {
   isApplyingRemoteData = true;
 
-  const localStates = loadLocalCheckStates();
+  // チェック状態: Firestore優先、なければlocalStorage
+  const remoteStates = data.checkStates || {};
+  const localStates  = loadLocalCheckStates();
+  const states = Object.keys(remoteStates).length > 0 ? remoteStates : localStates;
 
+  // フォルダ更新
   if (data.folders && data.folders.length > 0) {
     const localVis = loadFolderVisibility();
     folders = data.folders.map(f => ({
@@ -1148,7 +1182,35 @@ function applySharedData(data) {
     }));
   }
 
-  // 既存マーカーを削除
+  // 構造変化チェック（チェックポイントの配置・構成が同じならアイコン更新のみ）
+  const incoming = data.checkpoints || [];
+  const structureUnchanged =
+    checkpoints.length > 0 &&
+    incoming.length === checkpoints.length &&
+    incoming.every((d, i) => {
+      const c = checkpoints[i];
+      return c && d.id === c.id && d.lat === c.lat && d.lng === c.lng && d.folderId === c.folderId;
+    });
+
+  if (structureUnchanged) {
+    // チェック状態だけ更新（マーカー再生成なし）
+    checkpoints.forEach(cp => {
+      const s = states[cp.id] || { checked: false, checkedAt: null };
+      if (cp.checked !== s.checked) {
+        cp.checked   = s.checked;
+        cp.checkedAt = s.checkedAt || null;
+        cp.marker.setIcon(makeIcon(cp.checked));
+      }
+    });
+    // localStorageにも反映
+    saveLocalCheckStates();
+    renderList();
+    renderReport();
+    isApplyingRemoteData = false;
+    return;
+  }
+
+  // 構造が変わった場合: フルリビルド
   checkpoints.forEach(cp => {
     if (cp.marker) map.removeLayer(cp.marker);
     if (cp.circle) map.removeLayer(cp.circle);
@@ -1158,9 +1220,8 @@ function applySharedData(data) {
 
   if (data.nextId) nextId = data.nextId;
 
-  // Firestore定義 + ローカルチェック状態でチェックポイントを再構築
-  (data.checkpoints || []).forEach(d => {
-    const state = localStates[d.id] || { checked: false, checkedAt: null };
+  incoming.forEach(d => {
+    const state = states[d.id] || { checked: false, checkedAt: null };
     const marker = L.marker([d.lat, d.lng], { icon: makeIcon(state.checked), draggable: true })
       .addTo(map)
       .bindPopup(`<b>${escHtml(d.name)}</b><br><small>${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}</small>`);
@@ -1176,6 +1237,7 @@ function applySharedData(data) {
     if (folder && folder.visible === false) setCheckpointMapVisibility(cp, false);
   });
 
+  saveLocalCheckStates();
   renderList();
   renderReport();
   isApplyingRemoteData = false;
@@ -1481,7 +1543,15 @@ function removeOtherDevice(vid) {
 
 function openAdminPanel() {
   updateAdminDeviceList();
+  // 初期設定に戻すボタンの有効/無効を最新化
+  updateResetButton();
   document.getElementById('admin-overlay').classList.remove('hidden');
+}
+
+function adminClearTrack() {
+  if (!confirm('自端末の走行軌跡をクリアしますか？')) return;
+  clearTrack();
+  showToast('🗑 軌跡をクリアしました');
 }
 
 function closeAdminPanel() {
@@ -1519,8 +1589,8 @@ function updateAdminDeviceList() {
       <span class="admin-dot" style="background:${info.color}"></span>
       <span class="admin-device-name">${escHtml(vid)}${info.isSelf ? ' (この端末)' : ''}</span>
       <span class="admin-device-time">${info.isSelf ? '稼働中' : (ageMins < 1 ? '1分以内' : ageMins + '分前')}</span>
-      ${(!info.isSelf && isOfflineWarn)
-        ? `<button class="btn-kick" onclick="kickDevice('${escHtml(vid)}')">キック</button>`
+      ${!info.isSelf
+        ? `<button class="btn-kick" onclick="kickDevice('${escHtml(vid)}')">${isOfflineWarn ? '⚠️ キック' : 'キック'}</button>`
         : ''}`;
     el.appendChild(row);
   });
@@ -1752,7 +1822,8 @@ function checkPoint(id, isAuto) {
   cp.marker.setIcon(makeIcon(true));
   if (isAuto) showToast(`✅ 自動チェック: ${cp.name}`);
   renderList(); renderReport();
-  saveLocalCheckStates(); // チェック状態はローカルのみ
+  saveLocalCheckStates();
+  saveCheckStatesToFirestore();
 }
 
 function uncheckPoint(id) {
@@ -1763,7 +1834,8 @@ function uncheckPoint(id) {
   cp.marker.setIcon(makeIcon(false));
   delete contactStartTimes[id];
   renderList(); renderReport();
-  saveLocalCheckStates(); // チェック状態はローカルのみ
+  saveLocalCheckStates();
+  saveCheckStatesToFirestore();
 }
 
 function deletePoint(id) {
@@ -2430,12 +2502,12 @@ async function resetToDefault() {
 
     setSyncStatus('⏳ 保存中…', 'loading');
     await SHARED_DOC.set({
-      folders:    data.defaultFolders,
+      folders:     data.defaultFolders,
       checkpoints: data.defaultCheckpoints,
-      nextId:     data.defaultNextId,
+      nextId:      data.defaultNextId,
+      checkStates: {},
     }, { merge: true });
 
-    // 全端末のチェック状態はローカルなので、自端末分のみクリア
     localStorage.removeItem('patrol_check_states');
     setSyncStatus('✅ 同期済', 'ok');
     showToast('↩ 初期設定に戻しました');
@@ -2446,7 +2518,7 @@ async function resetToDefault() {
 }
 
 async function updateResetButton() {
-  const btn = document.getElementById('btn-reset-default');
+  const btn = document.getElementById('admin-btn-reset-default');
   if (!btn) return;
   try {
     const snap = await SHARED_DOC.get();
