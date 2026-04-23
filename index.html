@@ -325,6 +325,23 @@
     .btn-move:hover { background: #e2e8f0; }
     .btn-move:disabled { opacity: 0.3; cursor: default; }
 
+    .drag-handle {
+      cursor: grab;
+      font-size: 1.1rem;
+      color: #a0aec0;
+      padding: 0 6px 0 0;
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+      touch-action: none;
+      user-select: none;
+      line-height: 1;
+    }
+    .drag-handle:active { cursor: grabbing; color: #4a5568; }
+    .checkpoint-card.dragging { opacity: 0.35; box-shadow: none; }
+    .checkpoint-card.drag-over-top { border-top: 2px solid #3182ce; }
+    .checkpoint-card.drag-over-bottom { border-bottom: 2px solid #3182ce; }
+
     .folder-content {
       padding: 8px;
       display: flex;
@@ -602,6 +619,98 @@
         min-height: 0;
       }
     }
+
+    /* ===== 車両選択オーバーレイ ===== */
+    #vehicle-select-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.72);
+      z-index: 10000;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #vehicle-select-overlay.hidden { display: none; }
+    .vehicle-select-box {
+      background: white; border-radius: 16px;
+      padding: 24px; width: min(90vw, 400px);
+      max-height: 85vh; overflow-y: auto;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+    }
+    .vehicle-select-box h2 {
+      font-size: 1.05rem; font-weight: 700;
+      margin-bottom: 6px; text-align: center; color: #2d3748;
+    }
+    .vehicle-select-box p {
+      font-size: 0.78rem; color: #718096;
+      text-align: center; margin-bottom: 14px;
+    }
+    #vehicle-select-warn {
+      color: #e53e3e; font-size: 0.82rem;
+      text-align: center; margin-bottom: 10px; min-height: 18px;
+    }
+    .vehicle-btn {
+      display: flex; align-items: center; gap: 10px;
+      width: 100%; padding: 11px 14px; margin-bottom: 6px;
+      border: 2px solid #e2e8f0; border-radius: 10px;
+      background: white; font-size: 0.93rem; font-weight: 600;
+      cursor: pointer; transition: all 0.15s; color: #2d3748;
+      text-align: left;
+    }
+    .vehicle-btn:hover:not(:disabled) { background: #ebf8ff; border-color: #3182ce; }
+    .vehicle-btn:disabled { opacity: 0.42; cursor: not-allowed; background: #f7fafc; }
+    .vc-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+    .vc-status { margin-left: auto; font-size: 0.72rem; color: #a0aec0; font-weight: 400; }
+    .vehicle-btn.in-use .vc-status { color: #e53e3e; }
+
+    /* ===== 管理者モードオーバーレイ ===== */
+    #admin-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.55);
+      z-index: 9000;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #admin-overlay.hidden { display: none; }
+    .admin-box {
+      background: white; border-radius: 14px;
+      padding: 20px; width: min(92vw, 480px);
+      max-height: 80vh; overflow-y: auto;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.35);
+    }
+    .admin-box h2 {
+      font-size: 1rem; font-weight: 700; margin-bottom: 14px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .admin-device-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px; border: 1px solid #e2e8f0;
+      border-radius: 8px; margin-bottom: 6px; font-size: 0.85rem;
+    }
+    .admin-device-row.offline-warn { background: #fff5f5; border-color: #fed7d7; }
+    .admin-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .admin-device-name { font-weight: 600; flex: 1; }
+    .admin-device-time { font-size: 0.72rem; color: #718096; }
+    .btn-kick {
+      padding: 3px 9px; border: none; border-radius: 5px;
+      background: #e53e3e; color: white;
+      font-size: 0.72rem; font-weight: 600; cursor: pointer;
+    }
+    .btn-kick:hover { opacity: 0.8; }
+    .btn-admin-close {
+      padding: 4px 12px; border: 1px solid #cbd5e0;
+      border-radius: 6px; background: white; cursor: pointer; font-size: 0.82rem;
+    }
+    #btn-admin {
+      padding: 4px 10px;
+      border: 1px solid rgba(255,255,255,0.5); border-radius: 8px;
+      background: rgba(255,255,255,0.15); color: white;
+      font-size: 0.76rem; font-weight: 600; cursor: pointer; flex-shrink: 0;
+    }
+    #btn-admin:hover { background: rgba(255,255,255,0.28); }
+    #btn-change-vehicle {
+      padding: 4px 10px;
+      border: 1px solid rgba(255,255,255,0.5); border-radius: 8px;
+      background: rgba(255,255,255,0.15); color: white;
+      font-size: 0.76rem; cursor: pointer; flex-shrink: 0;
+    }
+    #btn-change-vehicle:hover { background: rgba(255,255,255,0.28); }
   </style>
 </head>
 <body>
@@ -617,8 +726,34 @@
       <button class="btn-track btn-track-toggle" id="btn-track-toggle" onclick="toggleTrackVisibility()">表示中</button>
       <button class="btn-track btn-track-clear" onclick="clearTrack()">軌跡クリア</button>
     </div>
+    <button id="btn-change-vehicle" onclick="showVehicleSelect(true)" style="display:none">🚛 <span id="vehicle-label-header"></span></button>
+    <button id="btn-admin" onclick="openAdminPanel()">🔧 管理者</button>
   </div>
 </header>
+
+<!-- 車両選択オーバーレイ -->
+<div id="vehicle-select-overlay">
+  <div class="vehicle-select-box">
+    <h2>🚛 車両を選択してください</h2>
+    <p>この端末で使用する車両を選択してください</p>
+    <div id="vehicle-select-warn"></div>
+    <div id="vehicle-btn-list">
+      <div style="text-align:center;color:#a0aec0;padding:20px">読み込み中…</div>
+    </div>
+  </div>
+</div>
+
+<!-- 管理者モードオーバーレイ -->
+<div id="admin-overlay" class="hidden">
+  <div class="admin-box">
+    <h2>🔧 管理者モード
+      <button class="btn-admin-close" onclick="closeAdminPanel()">✕ 閉じる</button>
+    </h2>
+    <div id="admin-device-list">
+      <div style="text-align:center;color:#a0aec0;padding:10px">端末情報を読み込み中…</div>
+    </div>
+  </div>
+</div>
 
 <div id="mode-bar" class="mode-edit">
   <button class="mode-btn active-edit"  id="btn-mode-edit"    onclick="setMode('edit')">📍 追加モード</button>
@@ -717,14 +852,122 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const SHARED_DOC = db.collection('patrol').doc('shared');
+const DEVICES_COL = db.collection('patrol_devices');
 
 // Firestoreから受信したデータを適用中の場合、書き戻しを防ぐフラグ
 let isApplyingRemoteData = false;
+
+/* ===== 車両カラー（フォルダ順、16色） ===== */
+const VEHICLE_COLORS = [
+  '#E53E3E','#DD6B20','#D69E2E','#38A169',
+  '#319795','#3182CE','#6B46C1','#D53F8C',
+  '#C05621','#2B6CB0','#276749','#744210',
+  '#553C9A','#97266D','#2C7A7B','#4A5568',
+];
+
+/* ===== 車両・デバイス状態 ===== */
+let selectedVehicle  = localStorage.getItem('patrol_vehicle') || null;  // e.g. "遠石西号"
+let selectedColorIdx = parseInt(localStorage.getItem('patrol_vehicle_idx') || '0');
+let gpsWriteIntervalId = null;
+let otherDevices = {};   // { vehicleId: { marker, segments:[], stopMarkers:[], lastSeen, color } }
+let devicesUnsubscribe = null;
+const OFFLINE_WARN_MS  = 30 * 60 * 1000;  // 30分
+const OFFLINE_KICK_MS  = 60 * 60 * 1000;  // 60分
+const GPS_WRITE_INTERVAL = 6000;           // 6秒
+const MAX_TRACK_POINTS = 200;
+const STOP_DETECT_MS = 7000;              // 停止判定：7秒
 
 
 /* ================================================================
    同期ステータス表示
    ================================================================ */
+
+/* ================================================================
+   車両選択
+   ================================================================ */
+
+function showVehicleSelect(forceShow = false) {
+  if (!forceShow && selectedVehicle) {
+    document.getElementById('vehicle-select-overlay').classList.add('hidden');
+    updateVehicleHeader();
+    return;
+  }
+  renderVehicleButtons();
+  document.getElementById('vehicle-select-overlay').classList.remove('hidden');
+}
+
+async function renderVehicleButtons() {
+  const listEl = document.getElementById('vehicle-btn-list');
+  listEl.innerHTML = '<div style="text-align:center;color:#a0aec0;padding:20px">読み込み中…</div>';
+
+  // 使用中車両を取得
+  let inUseSet = new Set();
+  try {
+    const snap = await DEVICES_COL.get();
+    snap.forEach(doc => {
+      const d = doc.data();
+      if (d.inUse) inUseSet.add(doc.id);
+    });
+  } catch(e) {}
+
+  listEl.innerHTML = '';
+  folders.forEach((folder, idx) => {
+    const vehicleName = folder.name + '号';
+    const color = VEHICLE_COLORS[idx % VEHICLE_COLORS.length];
+    const isInUse = inUseSet.has(vehicleName) && vehicleName !== selectedVehicle;
+
+    const btn = document.createElement('button');
+    btn.className = 'vehicle-btn' + (isInUse ? ' in-use' : '');
+    btn.disabled = isInUse;
+    btn.innerHTML = `
+      <span class="vc-dot" style="background:${color}"></span>
+      ${escHtml(vehicleName)}
+      <span class="vc-status">${isInUse ? '使用中' : ''}</span>`;
+    btn.onclick = () => selectVehicle(vehicleName, idx);
+    listEl.appendChild(btn);
+  });
+}
+
+async function selectVehicle(vehicleName, colorIdx) {
+  document.getElementById('vehicle-select-warn').textContent = '';
+
+  // 他端末が使用中でないか再確認
+  try {
+    const doc = await DEVICES_COL.doc(vehicleName).get();
+    if (doc.exists && doc.data().inUse && vehicleName !== selectedVehicle) {
+      document.getElementById('vehicle-select-warn').textContent =
+        'この車両名はすでに使用中です。別の車両を選んでください。';
+      await renderVehicleButtons();
+      return;
+    }
+  } catch(e) {}
+
+  // 旧車両のinUseをクリア
+  if (selectedVehicle && selectedVehicle !== vehicleName) {
+    try { await DEVICES_COL.doc(selectedVehicle).update({ inUse: false }); } catch(e) {}
+  }
+
+  selectedVehicle  = vehicleName;
+  selectedColorIdx = colorIdx;
+  localStorage.setItem('patrol_vehicle', vehicleName);
+  localStorage.setItem('patrol_vehicle_idx', colorIdx);
+
+  document.getElementById('vehicle-select-overlay').classList.add('hidden');
+  updateVehicleHeader();
+  setMode('collect');
+  startGpsDeviceWrite();
+}
+
+function updateVehicleHeader() {
+  const btn = document.getElementById('btn-change-vehicle');
+  const lbl = document.getElementById('vehicle-label-header');
+  if (selectedVehicle) {
+    lbl.textContent = selectedVehicle;
+    btn.style.display = '';
+    btn.style.borderColor = 'rgba(255,255,255,0.5)';
+  }
+}
+
 
 function setSyncStatus(text, state) {
   const el = document.getElementById('sync-status');
@@ -848,13 +1091,24 @@ function loadLocalCheckStates() {
    チェック状態は保存しない（端末ごとにローカル管理）
    ================================================================ */
 
+function saveFolderVisibility() {
+  const vis = {};
+  folders.forEach(f => { vis[f.id] = f.visible !== false; });
+  localStorage.setItem('patrol_folder_visibility', JSON.stringify(vis));
+}
+
+function loadFolderVisibility() {
+  try { return JSON.parse(localStorage.getItem('patrol_folder_visibility') || '{}'); }
+  catch(e) { return {}; }
+}
+
 async function saveSharedData() {
   if (isApplyingRemoteData) return;
   const cpDefs = checkpoints.map(({ id, name, lat, lng, folderId }) =>
     ({ id, name, lat, lng, folderId })
   );
-  const folderDefs = folders.map(({ id, name, collapsed, visible }) =>
-    ({ id, name, collapsed: collapsed || false, visible: visible !== false })
+  const folderDefs = folders.map(({ id, name, collapsed }) =>
+    ({ id, name, collapsed: collapsed || false })
   );
   try {
     setSyncStatus('⏳ 保存中…', 'loading');
@@ -874,31 +1128,7 @@ function saveToStorage() {
 }
 
 
-/* ================================================================
-   Firestore リアルタイムリスナー
-   ================================================================ */
-
-function startFirestoreListener() {
-  setSyncStatus('⏳ 接続中…', 'loading');
-  SHARED_DOC.onSnapshot(
-    doc => {
-      if (!doc.exists) {
-        // 初回：Firestoreにデータなし → ローカルから読み込み
-        loadFromLocalStorage();
-        setSyncStatus('✅ 同期済', 'ok');
-        return;
-      }
-      applySharedData(doc.data());
-      setSyncStatus('✅ 同期済', 'ok');
-    },
-    err => {
-      console.error('Firestoreリスナーエラー:', err);
-      setSyncStatus('❌ 接続失敗', 'error');
-      showToast('❌ クラウド接続に失敗。ローカルデータを使用します。');
-      loadFromLocalStorage();
-    }
-  );
-}
+// startFirestoreListener は startFirestoreListenerThenVehicleSelect に統合済み
 
 /* ================================================================
    Firestoreのデータをアプリに適用
@@ -911,7 +1141,11 @@ function applySharedData(data) {
   const localStates = loadLocalCheckStates();
 
   if (data.folders && data.folders.length > 0) {
-    folders = data.folders;
+    const localVis = loadFolderVisibility();
+    folders = data.folders.map(f => ({
+      ...f,
+      visible: localVis.hasOwnProperty(f.id) ? localVis[f.id] : true,
+    }));
   }
 
   // 既存マーカーを削除
@@ -927,14 +1161,16 @@ function applySharedData(data) {
   // Firestore定義 + ローカルチェック状態でチェックポイントを再構築
   (data.checkpoints || []).forEach(d => {
     const state = localStates[d.id] || { checked: false, checkedAt: null };
-    const marker = L.marker([d.lat, d.lng], { icon: makeIcon(state.checked) })
+    const marker = L.marker([d.lat, d.lng], { icon: makeIcon(state.checked), draggable: true })
       .addTo(map)
       .bindPopup(`<b>${escHtml(d.name)}</b><br><small>${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}</small>`);
     marker.on('click', function() { this.openPopup(); });
+    if (currentMode !== 'edit') marker.dragging.disable();
     const circle = L.circle([d.lat, d.lng], {
-      radius: 5, color: '#3182ce', fillColor: '#3182ce', fillOpacity: 0.08, weight: 1.5,
+      radius: 12, color: '#3182ce', fillColor: '#3182ce', fillOpacity: 0.08, weight: 1.5,
     }).addTo(map);
     const cp = { ...d, checked: state.checked || false, checkedAt: state.checkedAt || null, marker, circle };
+    marker.on('dragend', function() { onMarkerDragEnd(cp); });
     checkpoints.push(cp);
     const folder = folders.find(f => f.id === cp.folderId);
     if (folder && folder.visible === false) setCheckpointMapVisibility(cp, false);
@@ -954,13 +1190,21 @@ function loadFromLocalStorage() {
   if (rawFolders) {
     try {
       const saved = JSON.parse(rawFolders);
+      const localVis = loadFolderVisibility();
       folders = createDefaultFolders().map(def => {
         const found = saved.find(s => s.id === def.id);
         if (!found) return def;
         const isOldDefault = /^コース\d+$/.test(found.name);
-        return { ...def, ...found, name: isOldDefault ? def.name : found.name };
+        const merged = { ...def, ...found, name: isOldDefault ? def.name : found.name };
+        merged.visible = localVis.hasOwnProperty(def.id) ? localVis[def.id] : true;
+        return merged;
       });
     } catch(e) {}
+  } else {
+    const localVis = loadFolderVisibility();
+    folders.forEach(f => {
+      f.visible = localVis.hasOwnProperty(f.id) ? localVis[f.id] : true;
+    });
   }
 
   const localStates = loadLocalCheckStates();
@@ -971,14 +1215,16 @@ function loadFromLocalStorage() {
     nextId = parseInt(localStorage.getItem('patrol_next_id') || '1');
     data.forEach(d => {
       const state = localStates[d.id] || { checked: d.checked || false, checkedAt: d.checkedAt || null };
-      const marker = L.marker([d.lat, d.lng], { icon: makeIcon(state.checked) })
+      const marker = L.marker([d.lat, d.lng], { icon: makeIcon(state.checked), draggable: true })
         .addTo(map)
         .bindPopup(`<b>${escHtml(d.name)}</b><br><small>${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}</small>`);
       marker.on('click', function() { this.openPopup(); });
+      if (currentMode !== 'edit') marker.dragging.disable();
       const circle = L.circle([d.lat, d.lng], {
-        radius: 5, color: '#3182ce', fillColor: '#3182ce', fillOpacity: 0.08, weight: 1.5,
+        radius: 12, color: '#3182ce', fillColor: '#3182ce', fillOpacity: 0.08, weight: 1.5,
       }).addTo(map);
       const cp = { ...d, folderId: d.folderId || 1, checked: state.checked, checkedAt: state.checkedAt, marker, circle };
+      marker.on('dragend', function() { onMarkerDragEnd(cp); });
       checkpoints.push(cp);
       const folder = folders.find(f => f.id === cp.folderId);
       if (folder && folder.visible === false) setCheckpointMapVisibility(cp, false);
@@ -986,6 +1232,28 @@ function loadFromLocalStorage() {
   } catch(e) {
     console.warn('ローカルデータの読み込みに失敗:', e);
   }
+}
+
+
+/* ================================================================
+   マーカードラッグ終了時の処理
+   ================================================================ */
+
+function onMarkerDragEnd(cp) {
+  if (currentMode !== 'edit') {
+    cp.marker.setLatLng([cp.lat, cp.lng]);
+    return;
+  }
+  const pos = cp.marker.getLatLng();
+  cp.lat = pos.lat;
+  cp.lng = pos.lng;
+  cp.circle.setLatLng([cp.lat, cp.lng]);
+  cp.marker.setPopupContent(
+    `<b>${escHtml(cp.name)}</b><br><small>${cp.lat.toFixed(5)}, ${cp.lng.toFixed(5)}</small>`
+  );
+  renderList();
+  renderReport();
+  saveSharedData();
 }
 
 
@@ -1016,6 +1284,7 @@ function setMode(mode) {
       '<strong>📍 追加モード</strong>' +
       'フォルダを選択し、地図をクリックしてチェックポイントを追加してください。';
     selectorWrap.style.display = '';
+    checkpoints.forEach(cp => { if (cp.marker && cp.marker.dragging) cp.marker.dragging.enable(); });
   } else {
     modeBar.className    = 'mode-collect';
     mapEl.className      = 'mode-collect';
@@ -1028,6 +1297,7 @@ function setMode(mode) {
       '<strong>🚛 回収モード</strong>' +
       'GPSで5m以内に近づくと自動チェックされます。手動操作も可能です。';
     selectorWrap.style.display = 'none';
+    checkpoints.forEach(cp => { if (cp.marker && cp.marker.dragging) cp.marker.dragging.disable(); });
   }
 
   renderList();
@@ -1055,6 +1325,255 @@ function makeIcon(checked) {
     iconSize: [28, 36], iconAnchor: [14, 36], popupAnchor: [0, -36], className: '',
   });
 }
+
+
+/* ================================================================
+   GPS → Firebase 書き込み（6秒間隔）
+   ================================================================ */
+
+function startGpsDeviceWrite() {
+  if (gpsWriteIntervalId) clearInterval(gpsWriteIntervalId);
+  gpsWriteIntervalId = setInterval(writeDeviceGps, GPS_WRITE_INTERVAL);
+}
+
+async function writeDeviceGps() {
+  if (!selectedVehicle || currentLat == null) return;
+
+  // 軌跡最新200点
+  const slim = trackPoints.slice(-MAX_TRACK_POINTS).map(p => [
+    Math.round(p.lat * 1e5) / 1e5,
+    Math.round(p.lng * 1e5) / 1e5,
+    p.ts,
+  ]);
+
+  try {
+    await DEVICES_COL.doc(selectedVehicle).set({
+      vehicleId: selectedVehicle,
+      colorIdx:  selectedColorIdx,
+      lat:       currentLat,
+      lng:       currentLng,
+      lastSeen:  firebase.firestore.FieldValue.serverTimestamp(),
+      track:     slim,
+      inUse:     true,
+    });
+  } catch(e) { console.warn('GPS書き込みエラー:', e); }
+}
+
+// ページ離脱時にinUseをfalseに
+window.addEventListener('beforeunload', () => {
+  if (selectedVehicle) {
+    // sendBeacon相当（非同期だが最善）
+    DEVICES_COL.doc(selectedVehicle).update({ inUse: false }).catch(() => {});
+  }
+});
+
+
+/* ================================================================
+   他端末のリアルタイム表示
+   ================================================================ */
+
+function startDevicesListener() {
+  if (devicesUnsubscribe) devicesUnsubscribe();
+  devicesUnsubscribe = DEVICES_COL.onSnapshot(snap => {
+    snap.docChanges().forEach(change => {
+      const d   = change.doc.data();
+      const vid = change.doc.id;
+      if (vid === selectedVehicle) return; // 自分は除外
+
+      if (change.type === 'removed') {
+        removeOtherDevice(vid);
+        return;
+      }
+      if (!d.inUse) { removeOtherDevice(vid); return; }
+
+      const color = VEHICLE_COLORS[d.colorIdx % VEHICLE_COLORS.length] || '#4A5568';
+      const lastSeenMs = d.lastSeen ? d.lastSeen.toMillis() : 0;
+      const ageSec = (Date.now() - lastSeenMs) / 1000;
+      const isOfflineWarn = ageSec > OFFLINE_WARN_MS / 1000;
+
+      upsertOtherDevice(vid, d, color, isOfflineWarn);
+    });
+    updateAdminDeviceList();
+  }, err => console.warn('Devicesリスナーエラー:', err));
+}
+
+function upsertOtherDevice(vid, d, color, isOfflineWarn) {
+  if (!otherDevices[vid]) {
+    otherDevices[vid] = { marker: null, segments: [], stopMarkers: [], color };
+  }
+  const dev = otherDevices[vid];
+  dev.color   = color;
+  dev.lastSeen = d.lastSeen ? d.lastSeen.toMillis() : 0;
+  dev.lat = d.lat; dev.lng = d.lng;
+
+  // マーカー
+  const opacity = isOfflineWarn ? 0.35 : 1;
+  if (!dev.marker) {
+    dev.marker = L.circleMarker([d.lat, d.lng], {
+      radius: 9, fillColor: color, fillOpacity: opacity,
+      color: 'white', weight: 2, opacity,
+    }).addTo(map).bindTooltip(vid, { permanent: true, direction: 'top', offset: [0, -10], className: 'other-device-tooltip' });
+  } else {
+    dev.marker.setLatLng([d.lat, d.lng]);
+    dev.marker.setStyle({ fillOpacity: opacity, opacity });
+  }
+
+  // 軌跡
+  renderOtherDeviceTrack(vid, d.track || [], color, isOfflineWarn);
+}
+
+function renderOtherDeviceTrack(vid, rawTrack, color, isOfflineWarn) {
+  const dev = otherDevices[vid];
+  if (!dev) return;
+
+  // 既存レイヤー削除
+  dev.segments.forEach(s => map.removeLayer(s));
+  dev.stopMarkers.forEach(s => map.removeLayer(s));
+  dev.segments = []; dev.stopMarkers = [];
+
+  if (rawTrack.length < 2) return;
+
+  const pts = rawTrack.map(p => ({ lat: p[0], lng: p[1], ts: p[2] }));
+  const baseOpacity = isOfflineWarn ? 0.25 : 0.72;
+
+  // セグメント分割（停止検出）
+  let segStart = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const gap = pts[i + 1].ts - pts[i].ts;
+    const isStop = gap >= STOP_DETECT_MS;
+    const isLast = i === pts.length - 2;
+
+    if (isStop || isLast) {
+      const segPts = pts.slice(segStart, i + 2).map(p => [p.lat, p.lng]);
+      if (segPts.length >= 2) {
+        const poly = L.polyline(segPts, {
+          color, weight: isStop ? 6 : 3,
+          opacity: isStop ? Math.min(1, baseOpacity + 0.25) : baseOpacity,
+          lineJoin: 'round',
+        }).addTo(map);
+        dev.segments.push(poly);
+      }
+      if (isStop) {
+        const sm = L.circleMarker([pts[i].lat, pts[i].lng], {
+          radius: 5, fillColor: color, fillOpacity: 0.7,
+          color: 'white', weight: 1.5,
+        }).addTo(map);
+        dev.stopMarkers.push(sm);
+      }
+      segStart = i + 1;
+    }
+  }
+}
+
+function removeOtherDevice(vid) {
+  const dev = otherDevices[vid];
+  if (!dev) return;
+  if (dev.marker) map.removeLayer(dev.marker);
+  dev.segments.forEach(s => map.removeLayer(s));
+  dev.stopMarkers.forEach(s => map.removeLayer(s));
+  delete otherDevices[vid];
+}
+
+
+/* ================================================================
+   管理者パネル
+   ================================================================ */
+
+function openAdminPanel() {
+  updateAdminDeviceList();
+  document.getElementById('admin-overlay').classList.remove('hidden');
+}
+
+function closeAdminPanel() {
+  document.getElementById('admin-overlay').classList.add('hidden');
+}
+
+function updateAdminDeviceList() {
+  const el = document.getElementById('admin-device-list');
+  if (!el) return;
+
+  // 自分自身 + 他端末を一覧表示
+  const all = {};
+  if (selectedVehicle) {
+    all[selectedVehicle] = {
+      color: VEHICLE_COLORS[selectedColorIdx % VEHICLE_COLORS.length],
+      lastSeen: Date.now(), isSelf: true,
+    };
+  }
+  Object.entries(otherDevices).forEach(([vid, dev]) => {
+    all[vid] = { color: dev.color, lastSeen: dev.lastSeen || 0, isSelf: false };
+  });
+
+  if (Object.keys(all).length === 0) {
+    el.innerHTML = '<div style="text-align:center;color:#a0aec0;padding:10px">稼働中の端末はありません</div>';
+    return;
+  }
+
+  el.innerHTML = '';
+  Object.entries(all).forEach(([vid, info]) => {
+    const ageMins = info.isSelf ? 0 : Math.floor((Date.now() - info.lastSeen) / 60000);
+    const isOfflineWarn = ageMins >= 30;
+    const row = document.createElement('div');
+    row.className = 'admin-device-row' + (isOfflineWarn ? ' offline-warn' : '');
+    row.innerHTML = `
+      <span class="admin-dot" style="background:${info.color}"></span>
+      <span class="admin-device-name">${escHtml(vid)}${info.isSelf ? ' (この端末)' : ''}</span>
+      <span class="admin-device-time">${info.isSelf ? '稼働中' : (ageMins < 1 ? '1分以内' : ageMins + '分前')}</span>
+      ${(!info.isSelf && isOfflineWarn)
+        ? `<button class="btn-kick" onclick="kickDevice('${escHtml(vid)}')">キック</button>`
+        : ''}`;
+    el.appendChild(row);
+  });
+}
+
+async function kickDevice(vid) {
+  if (!confirm(`「${vid}」を地図から除去しますか？`)) return;
+  try {
+    await DEVICES_COL.doc(vid).update({ inUse: false, track: [] });
+    removeOtherDevice(vid);
+    updateAdminDeviceList();
+    showToast(`✅ ${vid} をキックしました`);
+  } catch(e) {
+    showToast('❌ キックに失敗しました: ' + e.message);
+  }
+}
+
+
+/* ================================================================
+   オフライン自動キック & 毎日23:59軌跡削除
+   ================================================================ */
+
+setInterval(() => {
+  const now = Date.now();
+  Object.entries(otherDevices).forEach(([vid, dev]) => {
+    if (!dev.lastSeen) return;
+    if (now - dev.lastSeen >= OFFLINE_KICK_MS) {
+      kickDevice(vid);
+    }
+  });
+}, 60000); // 1分ごとにチェック
+
+// 毎日23:59 JST に軌跡を自動削除
+setInterval(async () => {
+  const now = new Date(Date.now() + 9 * 3600000); // JST
+  if (now.getUTCHours() === 14 && now.getUTCMinutes() === 59) { // 14:59 UTC = 23:59 JST
+    // 自端末の軌跡をクリア
+    trackPoints = [];
+    if (trackPolyline) { map.removeLayer(trackPolyline); trackPolyline = null; }
+    document.getElementById('track-info').textContent = '軌跡: 0pt';
+    localStorage.removeItem('patrol_track');
+
+    // 全デバイスのtrack をFirestoreからクリア
+    try {
+      const snap = await DEVICES_COL.get();
+      const batch = db.batch();
+      snap.forEach(doc => batch.update(doc.ref, { track: [] }));
+      await batch.commit();
+    } catch(e) {}
+
+    showToast('🗑 日付変更：軌跡データを削除しました');
+  }
+}, 60000);
 
 
 /* ================================================================
@@ -1129,17 +1648,19 @@ document.getElementById('modal').addEventListener('click', function(e) {
 function addCheckpoint(name, lat, lng, folderId) {
   const id = nextId++;
 
-  const marker = L.marker([lat, lng], { icon: makeIcon(false) })
+  const marker = L.marker([lat, lng], { icon: makeIcon(false), draggable: true })
     .addTo(map)
     .bindPopup(`<b>${escHtml(name)}</b><br><small>${lat.toFixed(5)}, ${lng.toFixed(5)}</small>`);
   marker.on('click', function() { this.openPopup(); });
 
   const circle = L.circle([lat, lng], {
-    radius: 5, color: '#3182ce',
+    radius: 12, color: '#3182ce',
     fillColor: '#3182ce', fillOpacity: 0.08, weight: 1.5,
   }).addTo(map);
 
-  checkpoints.push({ id, name, lat, lng, folderId, checked: false, checkedAt: null, marker, circle });
+  const cp = { id, name, lat, lng, folderId, checked: false, checkedAt: null, marker, circle };
+  marker.on('dragend', function() { onMarkerDragEnd(cp); });
+  checkpoints.push(cp);
 
   renderList();
   renderReport();
@@ -1206,7 +1727,7 @@ function toggleFolderVisibility(folderId, e) {
     setCheckpointMapVisibility(cp, folder.visible);
   });
   renderList();
-  saveSharedData();
+  saveFolderVisibility();
 }
 
 function setCheckpointMapVisibility(cp, visible) {
@@ -1299,6 +1820,135 @@ function moveCheckpoint(cpId, dir) {
 
 
 /* ================================================================
+   チェックポイントカードのドラッグ並び替え（マウス＋タッチ）
+   ================================================================ */
+
+let _dragCpId = null;
+
+function onCpDragStart(e) {
+  _dragCpId = parseInt(this.dataset.cpId);
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(() => this.classList.add('dragging'), 0);
+}
+
+function onCpDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const targetId = parseInt(this.dataset.cpId);
+  if (targetId === _dragCpId) return;
+  const rect = this.getBoundingClientRect();
+  const isTop = e.clientY < rect.top + rect.height / 2;
+  this.classList.toggle('drag-over-top',    isTop);
+  this.classList.toggle('drag-over-bottom', !isTop);
+}
+
+function onCpDragLeave(e) {
+  this.classList.remove('drag-over-top', 'drag-over-bottom');
+}
+
+function onCpDrop(e) {
+  e.preventDefault();
+  const targetId = parseInt(this.dataset.cpId);
+  this.classList.remove('drag-over-top', 'drag-over-bottom');
+  if (_dragCpId == null || targetId === _dragCpId) return;
+  const rect = this.getBoundingClientRect();
+  const insertBefore = e.clientY < rect.top + rect.height / 2;
+  reorderCpInList(_dragCpId, targetId, insertBefore);
+}
+
+function onCpDragEnd(e) {
+  document.querySelectorAll('.checkpoint-card').forEach(c =>
+    c.classList.remove('dragging', 'drag-over-top', 'drag-over-bottom')
+  );
+  _dragCpId = null;
+}
+
+function reorderCpInList(fromId, toId, insertBefore) {
+  const fromCp = checkpoints.find(c => c.id === fromId);
+  const toCp   = checkpoints.find(c => c.id === toId);
+  if (!fromCp || !toCp || fromCp.folderId !== toCp.folderId) return;
+  const fromIdx = checkpoints.indexOf(fromCp);
+  checkpoints.splice(fromIdx, 1);
+  const toIdx = checkpoints.indexOf(toCp);
+  checkpoints.splice(insertBefore ? toIdx : toIdx + 1, 0, fromCp);
+  renderList(); renderReport(); saveSharedData();
+}
+
+// タッチドラッグ用
+let _touchDragCpId   = null;
+let _touchDragCard   = null;
+let _touchGhost      = null;
+let _touchOffsetY    = 0;
+
+function onCpTouchStart(e) {
+  const card = this.closest('[data-cp-id]');
+  if (!card) return;
+  _touchDragCpId = parseInt(card.dataset.cpId);
+  _touchDragCard = card;
+  const touch = e.touches[0];
+  const rect  = card.getBoundingClientRect();
+  _touchOffsetY = touch.clientY - rect.top;
+
+  _touchGhost = card.cloneNode(true);
+  _touchGhost.style.cssText =
+    `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;` +
+    'opacity:0.7;pointer-events:none;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+  document.body.appendChild(_touchGhost);
+  card.classList.add('dragging');
+  e.preventDefault();
+}
+
+function onCpTouchMove(e) {
+  if (!_touchGhost) return;
+  const touch = e.touches[0];
+  _touchGhost.style.top = (touch.clientY - _touchOffsetY) + 'px';
+
+  _touchGhost.style.display = 'none';
+  const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  _touchGhost.style.display = '';
+
+  document.querySelectorAll('.checkpoint-card').forEach(c =>
+    c.classList.remove('drag-over-top', 'drag-over-bottom')
+  );
+  const target = el && el.closest('[data-cp-id]');
+  if (target) {
+    const targetId = parseInt(target.dataset.cpId);
+    if (targetId !== _touchDragCpId) {
+      const rect = target.getBoundingClientRect();
+      const isTop = touch.clientY < rect.top + rect.height / 2;
+      target.classList.toggle('drag-over-top',    isTop);
+      target.classList.toggle('drag-over-bottom', !isTop);
+    }
+  }
+  e.preventDefault();
+}
+
+function onCpTouchEnd(e) {
+  if (_touchGhost) { _touchGhost.remove(); _touchGhost = null; }
+  if (_touchDragCard) _touchDragCard.classList.remove('dragging');
+
+  const touch = e.changedTouches[0];
+  const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  const target = el && el.closest('[data-cp-id]');
+
+  document.querySelectorAll('.checkpoint-card').forEach(c =>
+    c.classList.remove('drag-over-top', 'drag-over-bottom')
+  );
+
+  if (target && _touchDragCpId != null) {
+    const targetId = parseInt(target.dataset.cpId);
+    if (targetId !== _touchDragCpId) {
+      const rect = target.getBoundingClientRect();
+      const insertBefore = touch.clientY < rect.top + rect.height / 2;
+      reorderCpInList(_touchDragCpId, targetId, insertBefore);
+    }
+  }
+  _touchDragCpId = null;
+  _touchDragCard = null;
+}
+
+
+/* ================================================================
    一覧UIのレンダリング
    ================================================================ */
 
@@ -1385,15 +2035,10 @@ function renderList() {
           (!isVisible ? ' card-disabled' : '');
 
         let actions = '';
+        let dragHandleHtml = '';
         if (currentMode === 'edit') {
-          const cpLocalIdx  = folderCps.findIndex(c => c.id === cp.id);
-          const isFirstCp   = cpLocalIdx === 0;
-          const isLastCp    = cpLocalIdx === folderCps.length - 1;
+          dragHandleHtml = `<div class="drag-handle" title="長押し・ドラッグで並び替え">⠿</div>`;
           actions = `
-            <button class="btn btn-move" onclick="moveCheckpoint(${cp.id}, -1)"
-              ${isFirstCp ? 'disabled' : ''}>▲</button>
-            <button class="btn btn-move" onclick="moveCheckpoint(${cp.id}, 1)"
-              ${isLastCp ? 'disabled' : ''}>▼</button>
             <button class="btn btn-rename" onclick="startRenamePoint(${cp.id})">名前変更</button>
             <button class="btn btn-focus"  onclick="focusPoint(${cp.id})">地図</button>
             <button class="btn btn-delete" onclick="deletePoint(${cp.id})">削除</button>`;
@@ -1405,8 +2050,12 @@ function renderList() {
             <button class="btn btn-focus" onclick="focusPoint(${cp.id})">地図</button>`;
         }
 
+        card.setAttribute('data-cp-id', cp.id);
+        card.setAttribute('data-folder-id', cp.folderId);
+
         card.innerHTML = `
           <div class="card-header">
+            ${dragHandleHtml}
             <div class="status-dot ${cp.checked ? 'checked' : ''}"></div>
             <div class="card-name">${escHtml(cp.name)}</div>
           </div>
@@ -1415,6 +2064,21 @@ function renderList() {
             ${cp.checked ? '✅ チェック済: ' + cp.checkedAt : '⬜ 未チェック'}
           </div>
           <div class="card-actions">${actions}</div>`;
+
+        if (currentMode === 'edit') {
+          card.setAttribute('draggable', 'true');
+          card.addEventListener('dragstart', onCpDragStart);
+          card.addEventListener('dragover',  onCpDragOver);
+          card.addEventListener('dragleave', onCpDragLeave);
+          card.addEventListener('drop',      onCpDrop);
+          card.addEventListener('dragend',   onCpDragEnd);
+          const handle = card.querySelector('.drag-handle');
+          if (handle) {
+            handle.addEventListener('touchstart', onCpTouchStart, { passive: false });
+            handle.addEventListener('touchmove',  onCpTouchMove,  { passive: false });
+            handle.addEventListener('touchend',   onCpTouchEnd);
+          }
+        }
 
         contentEl.appendChild(card);
       });
@@ -1531,18 +2195,21 @@ function onGpsSuccess(pos) {
 
   setGpsStatus(`精度 ±${acc}m`, 'active');
 
+  const ownColor = VEHICLE_COLORS[selectedColorIdx % VEHICLE_COLORS.length] || '#3182ce';
   if (!gpsMarker) {
     map.setView([currentLat, currentLng], 16);
     gpsMarker = L.circleMarker([currentLat, currentLng], {
-      radius: 8, fillColor: '#3182ce', fillOpacity: 1, color: 'white', weight: 2,
-    }).addTo(map).bindPopup('現在地');
+      radius: 8, fillColor: ownColor, fillOpacity: 1, color: 'white', weight: 2,
+    }).addTo(map).bindPopup(selectedVehicle || '現在地');
     gpsCircle = L.circle([currentLat, currentLng], {
-      radius: 5, color: '#38a169', fillColor: '#38a169', fillOpacity: 0.15, weight: 2,
+      radius: 10, color: ownColor, fillColor: ownColor, fillOpacity: 0.15, weight: 2,
     }).addTo(map);
   } else {
     gpsMarker.setLatLng([currentLat, currentLng]);
+    gpsMarker.setStyle({ fillColor: ownColor });
     gpsCircle.setLatLng([currentLat, currentLng]);
-    gpsCircle.setRadius(5);
+    gpsCircle.setStyle({ color: ownColor, fillColor: ownColor });
+    gpsCircle.setRadius(10);
   }
 
   const last = trackPoints[trackPoints.length - 1];
@@ -1592,26 +2259,60 @@ function setGpsStatus(text, cls) {
    走行軌跡の管理（端末ごとのローカル管理）
    ================================================================ */
 
-function updateTrackPolyline() {
-  const latlngs = trackPoints.map(p => [p.lat, p.lng]);
+// 自端末軌跡セグメント（停止検出付きレンダリング）
+let ownTrackSegments  = [];
+let ownStopMarkers    = [];
 
-  if (!trackPolyline) {
-    trackPolyline = L.polyline(latlngs, {
-      color: '#e53e3e', weight: 3, opacity: 0.75, lineJoin: 'round',
-    }).addTo(map);
-  } else {
-    trackPolyline.setLatLngs(latlngs);
+function updateTrackPolyline() {
+  // 既存レイヤーをすべて削除
+  ownTrackSegments.forEach(s => map.removeLayer(s));
+  ownStopMarkers.forEach(s => map.removeLayer(s));
+  ownTrackSegments = []; ownStopMarkers = [];
+
+  if (trackPolyline) { map.removeLayer(trackPolyline); trackPolyline = null; }
+
+  const pts  = trackPoints;
+  const color = VEHICLE_COLORS[selectedColorIdx % VEHICLE_COLORS.length] || '#e53e3e';
+  const baseOpacity = trackVisible ? 0.8 : 0;
+
+  if (pts.length < 2) {
+    document.getElementById('track-info').textContent = `軌跡: ${pts.length}pt`;
+    return;
   }
 
-  trackPolyline.setStyle({ opacity: trackVisible ? 0.75 : 0 });
-  document.getElementById('track-info').textContent = `軌跡: ${trackPoints.length}pt`;
+  let segStart = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const gap    = pts[i + 1].ts - pts[i].ts;
+    const isStop = gap >= STOP_DETECT_MS;
+    const isLast = i === pts.length - 2;
+
+    if (isStop || isLast) {
+      const segPts = pts.slice(segStart, i + 2).map(p => [p.lat, p.lng]);
+      if (segPts.length >= 2) {
+        const poly = L.polyline(segPts, {
+          color, weight: isStop ? 6 : 3,
+          opacity: isStop ? Math.min(1, baseOpacity + 0.18) : baseOpacity,
+          lineJoin: 'round',
+        }).addTo(map);
+        ownTrackSegments.push(poly);
+      }
+      if (isStop) {
+        const sm = L.circleMarker([pts[i].lat, pts[i].lng], {
+          radius: 5, fillColor: color, fillOpacity: trackVisible ? 0.75 : 0,
+          color: 'white', weight: 1.5, opacity: trackVisible ? 1 : 0,
+        }).addTo(map);
+        ownStopMarkers.push(sm);
+      }
+      segStart = i + 1;
+    }
+  }
+
+  document.getElementById('track-info').textContent = `軌跡: ${pts.length}pt`;
 }
 
 function toggleTrackVisibility() {
   trackVisible = !trackVisible;
-  if (trackPolyline) {
-    trackPolyline.setStyle({ opacity: trackVisible ? 0.75 : 0 });
-  }
+  updateTrackPolyline();
   const btn = document.getElementById('btn-track-toggle');
   btn.textContent = trackVisible ? '表示中' : '非表示';
   btn.classList.toggle('hidden-track', !trackVisible);
@@ -1620,6 +2321,8 @@ function toggleTrackVisibility() {
 function clearTrack() {
   if (!confirm('走行軌跡をクリアしますか？')) return;
   trackPoints = [];
+  ownTrackSegments.forEach(s => map.removeLayer(s)); ownTrackSegments = [];
+  ownStopMarkers.forEach(s => map.removeLayer(s));   ownStopMarkers   = [];
   if (trackPolyline) { map.removeLayer(trackPolyline); trackPolyline = null; }
   document.getElementById('track-info').textContent = '軌跡: 0pt';
   localStorage.removeItem('patrol_track');
@@ -1885,12 +2588,45 @@ function parseCsvLine(line) {
    アプリ起動処理
    ================================================================ */
 
-startFirestoreListener(); // Firestoreからデータ読み込み＆リアルタイム同期開始
-loadTrackFromStorage();   // 軌跡はローカルから（端末固有）
-updateResetButton();
+// 1. チェックポイント同期開始（最初のスナップショット後に車両選択を表示）
+startFirestoreListenerThenVehicleSelect();
+// 2. ローカル軌跡読み込み
+loadTrackFromStorage();
+// 3. 他端末リアルタイム表示
+startDevicesListener();
+// 4. GPS開始
 startGPS();
-renderList();
-renderReport();
+// 5. 初期設定ボタン更新
+updateResetButton();
+
+function startFirestoreListenerThenVehicleSelect() {
+  setSyncStatus('⏳ 接続中…', 'loading');
+  let firstSnapshot = true;
+  SHARED_DOC.onSnapshot(
+    doc => {
+      if (!doc.exists) {
+        loadFromLocalStorage();
+        setSyncStatus('✅ 同期済', 'ok');
+      } else {
+        applySharedData(doc.data());
+        setSyncStatus('✅ 同期済', 'ok');
+      }
+      if (firstSnapshot) {
+        firstSnapshot = false;
+        showVehicleSelect();           // フォルダ読み込み後に車両選択
+        if (selectedVehicle) startGpsDeviceWrite();
+      }
+    },
+    err => {
+      console.error('Firestoreリスナーエラー:', err);
+      setSyncStatus('❌ 接続失敗', 'error');
+      showToast('❌ クラウド接続に失敗。ローカルデータを使用します。');
+      loadFromLocalStorage();
+      showVehicleSelect();
+      if (selectedVehicle) startGpsDeviceWrite();
+    }
+  );
+}
 
 </script>
 </body>
