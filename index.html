@@ -679,6 +679,18 @@
       font-size: 0.76rem; font-weight: 600; cursor: pointer; flex-shrink: 0;
     }
     #btn-admin:hover { background: rgba(255,255,255,0.28); }
+    /* ===== チェックポイントポップアップ ===== */
+    .cp-popup { min-width: 140px; }
+    .cp-popup-name { font-weight: 700; font-size: 0.9rem; margin-bottom: 2px; }
+    .cp-popup-coord { font-size: 0.7rem; color: #718096; margin-bottom: 8px; }
+    .cp-popup-actions { display: flex; gap: 5px; }
+    .cp-popup-btn {
+      flex: 1; padding: 5px 0; border: none; border-radius: 6px;
+      font-size: 0.78rem; font-weight: 700; cursor: pointer;
+    }
+    .cp-popup-btn.check   { background: #38a169; color: white; }
+    .cp-popup-btn.uncheck { background: #e53e3e; color: white; }
+
     .admin-section-title {
       font-size: 0.78rem; font-weight: 700; color: #718096;
       text-transform: uppercase; letter-spacing: 0.04em;
@@ -1222,15 +1234,16 @@ function applySharedData(data) {
 
   incoming.forEach(d => {
     const state = states[d.id] || { checked: false, checkedAt: null };
+    const cp = { ...d, checked: state.checked || false, checkedAt: state.checkedAt || null, marker: null, circle: null };
     const marker = L.marker([d.lat, d.lng], { icon: makeIcon(state.checked), draggable: true })
       .addTo(map)
-      .bindPopup(`<b>${escHtml(d.name)}</b><br><small>${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}</small>`);
+      .bindPopup(makePopupHtml(cp));
     marker.on('click', function() { this.openPopup(); });
     if (currentMode !== 'edit') marker.dragging.disable();
     const circle = L.circle([d.lat, d.lng], {
       radius: 12, color: '#3182ce', fillColor: '#3182ce', fillOpacity: 0.08, weight: 1.5,
     }).addTo(map);
-    const cp = { ...d, checked: state.checked || false, checkedAt: state.checkedAt || null, marker, circle };
+    cp.marker = marker; cp.circle = circle;
     marker.on('dragend', function() { onMarkerDragEnd(cp); });
     checkpoints.push(cp);
     const folder = folders.find(f => f.id === cp.folderId);
@@ -1277,15 +1290,16 @@ function loadFromLocalStorage() {
     nextId = parseInt(localStorage.getItem('patrol_next_id') || '1');
     data.forEach(d => {
       const state = localStates[d.id] || { checked: d.checked || false, checkedAt: d.checkedAt || null };
+      const cp = { ...d, folderId: d.folderId || 1, checked: state.checked, checkedAt: state.checkedAt, marker: null, circle: null };
       const marker = L.marker([d.lat, d.lng], { icon: makeIcon(state.checked), draggable: true })
         .addTo(map)
-        .bindPopup(`<b>${escHtml(d.name)}</b><br><small>${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}</small>`);
+        .bindPopup(makePopupHtml(cp));
       marker.on('click', function() { this.openPopup(); });
       if (currentMode !== 'edit') marker.dragging.disable();
       const circle = L.circle([d.lat, d.lng], {
         radius: 12, color: '#3182ce', fillColor: '#3182ce', fillOpacity: 0.08, weight: 1.5,
       }).addTo(map);
-      const cp = { ...d, folderId: d.folderId || 1, checked: state.checked, checkedAt: state.checkedAt, marker, circle };
+      cp.marker = marker; cp.circle = circle;
       marker.on('dragend', function() { onMarkerDragEnd(cp); });
       checkpoints.push(cp);
       const folder = folders.find(f => f.id === cp.folderId);
@@ -1310,9 +1324,7 @@ function onMarkerDragEnd(cp) {
   cp.lat = pos.lat;
   cp.lng = pos.lng;
   cp.circle.setLatLng([cp.lat, cp.lng]);
-  cp.marker.setPopupContent(
-    `<b>${escHtml(cp.name)}</b><br><small>${cp.lat.toFixed(5)}, ${cp.lng.toFixed(5)}</small>`
-  );
+  cp.marker.setPopupContent(makePopupHtml(cp));
   renderList();
   renderReport();
   saveSharedData();
@@ -1718,9 +1730,10 @@ document.getElementById('modal').addEventListener('click', function(e) {
 function addCheckpoint(name, lat, lng, folderId) {
   const id = nextId++;
 
+  const cp = { id, name, lat, lng, folderId, checked: false, checkedAt: null, marker: null, circle: null };
   const marker = L.marker([lat, lng], { icon: makeIcon(false), draggable: true })
     .addTo(map)
-    .bindPopup(`<b>${escHtml(name)}</b><br><small>${lat.toFixed(5)}, ${lng.toFixed(5)}</small>`);
+    .bindPopup(makePopupHtml(cp));
   marker.on('click', function() { this.openPopup(); });
 
   const circle = L.circle([lat, lng], {
@@ -1728,7 +1741,7 @@ function addCheckpoint(name, lat, lng, folderId) {
     fillColor: '#3182ce', fillOpacity: 0.08, weight: 1.5,
   }).addTo(map);
 
-  const cp = { id, name, lat, lng, folderId, checked: false, checkedAt: null, marker, circle };
+  cp.marker = marker; cp.circle = circle;
   marker.on('dragend', function() { onMarkerDragEnd(cp); });
   checkpoints.push(cp);
 
@@ -1751,9 +1764,7 @@ function applyRenamePoint(id, newName) {
   const cp = checkpoints.find(c => c.id === id);
   if (!cp) return;
   cp.name = newName;
-  cp.marker.setPopupContent(
-    `<b>${escHtml(newName)}</b><br><small>${cp.lat.toFixed(5)}, ${cp.lng.toFixed(5)}</small>`
-  );
+  cp.marker.setPopupContent(makePopupHtml(cp));
   renderList(); renderReport(); saveSharedData();
 }
 
@@ -1820,6 +1831,7 @@ function checkPoint(id, isAuto) {
   cp.checked   = true;
   cp.checkedAt = new Date().toLocaleString('ja-JP');
   cp.marker.setIcon(makeIcon(true));
+  cp.marker.setPopupContent(makePopupHtml(cp));
   if (isAuto) showToast(`✅ 自動チェック: ${cp.name}`);
   renderList(); renderReport();
   saveLocalCheckStates();
@@ -1832,6 +1844,7 @@ function uncheckPoint(id) {
   cp.checked   = false;
   cp.checkedAt = null;
   cp.marker.setIcon(makeIcon(false));
+  cp.marker.setPopupContent(makePopupHtml(cp));
   delete contactStartTimes[id];
   renderList(); renderReport();
   saveLocalCheckStates();
@@ -2453,6 +2466,18 @@ function showToast(msg) {
    XSS対策
    ================================================================ */
 
+function makePopupHtml(cp) {
+  const actionBtn = cp.checked
+    ? `<button class="cp-popup-btn uncheck" onclick="uncheckPoint(${cp.id});this.closest('.leaflet-popup').querySelector && map.closePopup()">取り消し</button>`
+    : `<button class="cp-popup-btn check"   onclick="checkPoint(${cp.id},false);map.closePopup()">チェック</button>`;
+  return `
+    <div class="cp-popup">
+      <div class="cp-popup-name">${escHtml(cp.name)}</div>
+      <div class="cp-popup-coord">${cp.lat.toFixed(5)}, ${cp.lng.toFixed(5)}</div>
+      <div class="cp-popup-actions">${actionBtn}</div>
+    </div>`;
+}
+
 function escHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -2612,14 +2637,16 @@ function importCsv(input) {
 
         const folderId = resolveFolder(folderName);
         const id = nextId++;
+        const cp = { id, name, lat, lng, folderId, checked: false, checkedAt: null, marker: null, circle: null };
         const marker = L.marker([lat, lng], { icon: makeIcon(false) })
           .addTo(map)
-          .bindPopup(`<b>${escHtml(name)}</b><br><small>${lat.toFixed(5)}, ${lng.toFixed(5)}</small>`);
+          .bindPopup(makePopupHtml(cp));
         marker.on('click', function() { this.openPopup(); });
         const circle = L.circle([lat, lng], {
-          radius: 5, color: '#3182ce', fillColor: '#3182ce', fillOpacity: 0.08, weight: 1.5,
+          radius: 12, color: '#3182ce', fillColor: '#3182ce', fillOpacity: 0.08, weight: 1.5,
         }).addTo(map);
-        checkpoints.push({ id, name, lat, lng, folderId, checked: false, checkedAt: null, marker, circle });
+        cp.marker = marker; cp.circle = circle;
+        checkpoints.push(cp);
       });
 
       renderList();
