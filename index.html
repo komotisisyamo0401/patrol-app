@@ -731,6 +731,38 @@
     .btn-bulk-check:hover   { background: #9ae6b4; }
     .btn-bulk-uncheck:hover { background: #feb2b2; }
 
+    /* ===== パスワード認証オーバーレイ ===== */
+    #password-overlay {
+      position: fixed; inset: 0;
+      background: linear-gradient(135deg, #1a365d, #2b6cb0);
+      z-index: 20000;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #password-overlay.hidden { display: none; }
+    .password-box {
+      background: white; border-radius: 16px;
+      padding: 32px 28px; width: min(90vw, 360px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+      text-align: center;
+    }
+    .password-box .pw-icon { font-size: 2.2rem; margin-bottom: 10px; }
+    .password-box h2 { font-size: 1.05rem; font-weight: 700; color: #2d3748; margin-bottom: 6px; }
+    .password-box p  { font-size: 0.82rem; color: #718096; margin-bottom: 18px; }
+    #password-input {
+      width: 100%; border: 2px solid #e2e8f0; border-radius: 8px;
+      padding: 10px 14px; font-size: 1.05rem; outline: none;
+      margin-bottom: 8px; text-align: center; letter-spacing: 0.12em;
+      box-sizing: border-box;
+    }
+    #password-input:focus { border-color: #3182ce; box-shadow: 0 0 0 3px rgba(49,130,206,0.2); }
+    #password-warn { color: #e53e3e; font-size: 0.82rem; min-height: 20px; margin-bottom: 10px; }
+    .btn-pw-ok {
+      width: 100%; padding: 11px;
+      background: #2b6cb0; color: white; border: none;
+      border-radius: 8px; font-size: 0.95rem; font-weight: 700; cursor: pointer;
+    }
+    .btn-pw-ok:hover { background: #2c5282; }
+
     /* ===== GPS追従ボタン（Leafletコントロール内） ===== */
     #btn-gps-follow {
       width: auto !important;
@@ -748,6 +780,18 @@
   </style>
 </head>
 <body>
+
+<!-- パスワード認証オーバーレイ -->
+<div id="password-overlay">
+  <div class="password-box">
+    <div class="pw-icon">🔐</div>
+    <h2>ゴミ回収チェックアプリ</h2>
+    <p>パスワードを入力してください</p>
+    <input type="password" id="password-input" placeholder="パスワード" maxlength="30" autocomplete="off" />
+    <div id="password-warn"></div>
+    <button class="btn-pw-ok" onclick="submitPassword()">ログイン</button>
+  </div>
+</div>
 
 <header>
   <h1>🗺️ ゴミ回収チェックアプリ</h1>
@@ -790,9 +834,9 @@
     </div>
 
     <!-- 軌跡 -->
-    <div class="admin-section-title" style="margin-top:14px">🗺️ 軌跡</div>
-    <div class="admin-action-row">
-      <button class="btn-admin-action" onclick="adminClearTrack()">🗑 自端末の軌跡をクリア</button>
+    <div class="admin-section-title" style="margin-top:14px">🗺️ 軌跡クリア（端末ごと）</div>
+    <div id="admin-track-clear-list">
+      <div style="text-align:center;color:#a0aec0;font-size:0.8rem;padding:6px">読み込み中…</div>
     </div>
 
     <!-- チェックポイント設定 -->
@@ -927,7 +971,7 @@ const GPS_WRITE_INTERVAL = 6000;           // 6秒
 const MAX_TRACK_POINTS = 200;
 const STOP_DETECT_MS = 7000;              // 停止判定：7秒
 const AUTO_CHECK_DIST = 22;               // 自動チェック接触距離(m)：GPS円10m＋CP円12m
-const AUTO_CHECK_HOLD = 5000;             // 自動チェック持続時間(ms)
+const AUTO_CHECK_HOLD = 10000;            // 自動チェック持続時間(ms)
 
 
 /* ================================================================
@@ -1074,7 +1118,7 @@ let nextId = 1;
    モード・GPS関連
    ================================================================ */
 
-let currentMode = 'edit';
+let currentMode = 'collect';
 let currentLat  = null;
 let currentLng  = null;
 let gpsWatchId  = null;
@@ -1102,7 +1146,7 @@ let toastTimer = null;
    Leaflet 地図の初期化
    ================================================================ */
 
-const map = L.map('map', { zoomControl: true }).setView([34.03095, 131.83704], 15);
+const map = L.map('map', { zoomControl: false }).setView([34.03095, 131.83704], 15);
 
 L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
   attribution: '© OpenStreetMap contributors © CARTO',
@@ -1116,7 +1160,7 @@ map.on('click', function (e) {
   openModal('add-point');
 });
 
-/* ===== 地図上GPS操作ボタン（左下） ===== */
+/* ===== 左上カスタムコントロール（ズーム＋GPS追従＋現在地） ===== */
 const _locateCarSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="28" viewBox="0 0 26 42">
   <rect x="3" y="4" width="20" height="34" rx="5" fill="#2b6cb0" stroke="white" stroke-width="1.5"/>
   <rect x="5" y="6" width="16" height="9" rx="2" fill="rgba(255,255,255,0.78)"/>
@@ -1128,42 +1172,67 @@ const _locateCarSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height
   <circle cx="13" cy="21" r="2.5" fill="rgba(255,255,255,0.85)"/>
 </svg>`;
 
-const GpsLocateControl = L.Control.extend({
-  options: { position: 'bottomleft' },
+const CustomTopLeftControl = L.Control.extend({
+  options: { position: 'topleft' },
   onAdd: function() {
-    const c = L.DomUtil.create('div', 'leaflet-bar');
-    const a = L.DomUtil.create('a', '', c);
-    a.innerHTML = _locateCarSvg;
-    a.title = '現在地へ移動';
-    a.href = '#';
-    a.style.cssText = 'width:34px;height:34px;display:flex;align-items:center;justify-content:center;text-decoration:none;line-height:1;';
-    L.DomEvent.on(a, 'click', function(e) {
+    const wrap = L.DomUtil.create('div', '');
+    wrap.style.cssText = 'display:flex;flex-direction:column;gap:5px;';
+
+    function makeBar(cls) {
+      const bar = L.DomUtil.create('div', 'leaflet-bar');
+      const a   = L.DomUtil.create('a', cls, bar);
+      a.href = '#';
+      return { bar, a };
+    }
+
+    // 行1: ズームイン ＋ GPS追従ボタン
+    const row1 = L.DomUtil.create('div', '');
+    row1.style.cssText = 'display:flex;gap:5px;align-items:stretch;';
+
+    const { bar: ziBar, a: ziBtn } = makeBar('leaflet-control-zoom-in');
+    ziBtn.innerHTML = '+';
+    ziBtn.title = 'ズームイン';
+    ziBtn.style.cssText = 'width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:bold;text-decoration:none;';
+    L.DomEvent.on(ziBtn, 'click', e => { L.DomEvent.stopPropagation(e); L.DomEvent.preventDefault(e); map.zoomIn(); });
+
+    const { bar: fBar, a: fBtn } = makeBar('follow-on');
+    fBtn.id = 'btn-gps-follow';
+    fBtn.innerHTML = '追従on';
+    fBtn.title = 'GPS追従: ON';
+    L.DomEvent.on(fBtn, 'click', e => { L.DomEvent.stopPropagation(e); L.DomEvent.preventDefault(e); toggleGpsFollow(); });
+
+    row1.appendChild(ziBar);
+    row1.appendChild(fBar);
+
+    // 行2: ズームアウト ＋ 現在地ボタン
+    const row2 = L.DomUtil.create('div', '');
+    row2.style.cssText = 'display:flex;gap:5px;align-items:stretch;';
+
+    const { bar: zoBar, a: zoBtn } = makeBar('leaflet-control-zoom-out');
+    zoBtn.innerHTML = '&#x2212;';
+    zoBtn.title = 'ズームアウト';
+    zoBtn.style.cssText = 'width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:bold;text-decoration:none;';
+    L.DomEvent.on(zoBtn, 'click', e => { L.DomEvent.stopPropagation(e); L.DomEvent.preventDefault(e); map.zoomOut(); });
+
+    const { bar: locBar, a: locBtn } = makeBar('');
+    locBtn.innerHTML = _locateCarSvg;
+    locBtn.title = '現在地へ移動';
+    locBtn.style.cssText = 'width:34px;height:34px;display:flex;align-items:center;justify-content:center;text-decoration:none;';
+    L.DomEvent.on(locBtn, 'click', e => {
       L.DomEvent.stopPropagation(e); L.DomEvent.preventDefault(e);
       if (currentLat !== null) map.setView([currentLat, currentLng], map.getZoom());
       else showToast('⚠️ GPS位置が取得できていません');
     });
-    return c;
+
+    row2.appendChild(zoBar);
+    row2.appendChild(locBar);
+
+    wrap.appendChild(row1);
+    wrap.appendChild(row2);
+    return wrap;
   }
 });
-const GpsFollowControl = L.Control.extend({
-  options: { position: 'bottomleft' },
-  onAdd: function() {
-    const c = L.DomUtil.create('div', 'leaflet-bar');
-    const a = L.DomUtil.create('a', 'follow-on', c);
-    a.id = 'btn-gps-follow';
-    a.innerHTML = '追従on';
-    a.title = 'GPS追従: ON';
-    a.href = '#';
-    a.style.cssText = 'height:34px;display:flex;align-items:center;justify-content:center;text-decoration:none;line-height:1;';
-    L.DomEvent.on(a, 'click', function(e) {
-      L.DomEvent.stopPropagation(e); L.DomEvent.preventDefault(e);
-      toggleGpsFollow();
-    });
-    return c;
-  }
-});
-new GpsLocateControl().addTo(map);
-new GpsFollowControl().addTo(map);
+new CustomTopLeftControl().addTo(map);
 
 
 /* ================================================================
@@ -1452,7 +1521,7 @@ function setMode(mode) {
     hintEl.className     = 'mode-hint hint-collect';
     hintEl.innerHTML     =
       '<strong>🚛 回収モード</strong>' +
-      'GPS円(10m)とCP円(12m)が接触し7秒間持続すると自動チェックされます。手動操作も可能です。';
+      'GPS円(10m)とCP円(12m)が接触し10秒間持続すると自動チェックされます。手動操作も可能です。';
     selectorWrap.style.display = 'none';
     checkpoints.forEach(cp => { if (cp.marker && cp.marker.dragging) cp.marker.dragging.disable(); });
   }
@@ -1742,15 +1811,50 @@ function removeOtherDevice(vid) {
 
 function openAdminPanel() {
   updateAdminDeviceList();
-  // 初期設定に戻すボタンの有効/無効を最新化
+  renderAdminTrackClearList();
   updateResetButton();
   document.getElementById('admin-overlay').classList.remove('hidden');
 }
 
-function adminClearTrack() {
-  if (!confirm('自端末の走行軌跡をクリアしますか？')) return;
-  clearTrack();
-  showToast('🗑 軌跡をクリアしました');
+function renderAdminTrackClearList() {
+  const el = document.getElementById('admin-track-clear-list');
+  if (!el) return;
+  el.innerHTML = '';
+
+  const devices = [];
+  if (selectedVehicle) devices.push({ vid: selectedVehicle, isSelf: true });
+  Object.keys(otherDevices).forEach(vid => devices.push({ vid, isSelf: false }));
+
+  if (devices.length === 0) {
+    el.innerHTML = '<div style="font-size:0.8rem;color:#a0aec0;padding:4px 2px;">稼働中の端末がありません</div>';
+    return;
+  }
+  devices.forEach(({ vid, isSelf }) => {
+    const row = document.createElement('div');
+    row.className = 'admin-action-row';
+    const label = isSelf ? `${vid}（この端末）` : vid;
+    row.innerHTML = `<button class="btn-admin-action" onclick="adminClearTrackByDevice('${escHtml(vid)}',${isSelf})">🗑 ${escHtml(label)}</button>`;
+    el.appendChild(row);
+  });
+}
+
+async function adminClearTrackByDevice(vid, isSelf) {
+  if (!confirm(`「${vid}」の軌跡をクリアしますか？`)) return;
+  if (isSelf) {
+    clearOwnTrack();
+  } else {
+    const dev = otherDevices[vid];
+    if (dev) {
+      dev.segments.forEach(s => map.removeLayer(s));   dev.segments   = [];
+      dev.stopMarkers.forEach(s => map.removeLayer(s)); dev.stopMarkers = [];
+    }
+  }
+  try {
+    await DEVICES_COL.doc(vid).update({ track: [] });
+    showToast(`🗑 ${vid} の軌跡をクリアしました`);
+  } catch(e) {
+    showToast('❌ 軌跡クリアに失敗: ' + (e.message || e));
+  }
 }
 
 function closeAdminPanel() {
@@ -2639,8 +2743,7 @@ function toggleTrackVisibility() {
   btn.classList.toggle('hidden-track', !trackVisible);
 }
 
-function clearTrack() {
-  if (!confirm('走行軌跡をクリアしますか？')) return;
+function clearOwnTrack() {
   trackPoints = [];
   ownTrackSegments.forEach(s => map.removeLayer(s)); ownTrackSegments = [];
   ownStopMarkers.forEach(s => map.removeLayer(s));   ownStopMarkers   = [];
@@ -2920,19 +3023,55 @@ function parseCsvLine(line) {
 
 
 /* ================================================================
-   アプリ起動処理
+   パスワード認証 & アプリ起動
    ================================================================ */
 
-// 1. チェックポイント同期開始（最初のスナップショット後に車両選択を表示）
-startFirestoreListenerThenVehicleSelect();
-// 2. ローカル軌跡読み込み
-loadTrackFromStorage();
-// 3. 他端末リアルタイム表示
-startDevicesListener();
-// 4. GPS開始
-startGPS();
-// 5. 初期設定ボタン更新
-updateResetButton();
+const _APP_PASSWORD = 'itakugomi0';
+
+function checkPassword() {
+  if (sessionStorage.getItem('patrol_auth') === '1') {
+    initApp();
+    return;
+  }
+  // オーバーレイはHTMLで最初から表示済み
+  setTimeout(() => {
+    const inp = document.getElementById('password-input');
+    if (inp) inp.focus();
+  }, 100);
+}
+
+function submitPassword() {
+  const val = document.getElementById('password-input').value;
+  if (val === _APP_PASSWORD) {
+    sessionStorage.setItem('patrol_auth', '1');
+    document.getElementById('password-overlay').classList.add('hidden');
+    initApp();
+  } else {
+    document.getElementById('password-warn').textContent = '❌ パスワードが違います';
+    document.getElementById('password-input').value = '';
+    document.getElementById('password-input').focus();
+  }
+}
+
+document.getElementById('password-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') submitPassword();
+});
+
+function initApp() {
+  setMode('collect');
+  // 1. チェックポイント同期開始（最初のスナップショット後に車両選択を表示）
+  startFirestoreListenerThenVehicleSelect();
+  // 2. ローカル軌跡読み込み
+  loadTrackFromStorage();
+  // 3. 他端末リアルタイム表示
+  startDevicesListener();
+  // 4. GPS開始
+  startGPS();
+  // 5. 初期設定ボタン更新
+  updateResetButton();
+}
+
+checkPassword();
 
 function startFirestoreListenerThenVehicleSelect() {
   setSyncStatus('⏳ 接続中…', 'loading');
