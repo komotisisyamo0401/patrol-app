@@ -634,6 +634,12 @@
     .vc-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
     .vc-status { margin-left: auto; font-size: 0.72rem; color: #a0aec0; font-weight: 400; }
     .vehicle-btn.in-use .vc-status { color: #e53e3e; }
+    .vehicle-btn.spectator-btn {
+      background: #ebf8ff; border-color: #90cdf4; color: #2c5282;
+      font-weight: 700;
+    }
+    .vehicle-btn.spectator-btn:hover { background: #bee3f8; border-color: #63b3ed; }
+    .spectator-sep { border: none; border-top: 1px solid #e2e8f0; margin: 8px 0; }
 
     /* ===== 管理者モードオーバーレイ ===== */
     #admin-overlay {
@@ -962,6 +968,7 @@ const VEHICLE_COLORS = [
 /* ===== 車両・デバイス状態 ===== */
 let selectedVehicle  = localStorage.getItem('patrol_vehicle') || null;  // e.g. "遠石西号"
 let selectedColorIdx = parseInt(localStorage.getItem('patrol_vehicle_idx') || '0');
+let spectatorMode    = (localStorage.getItem('patrol_spectator') === '1'); // 傍観モード
 let gpsWriteIntervalId = null;
 let otherDevices = {};   // { vehicleId: { marker, segments:[], stopMarkers:[], lastSeen, color } }
 let devicesUnsubscribe = null;
@@ -983,7 +990,7 @@ const AUTO_CHECK_HOLD = 10000;            // 自動チェック持続時間(ms)
    ================================================================ */
 
 function showVehicleSelect(forceShow = false) {
-  if (!forceShow && selectedVehicle) {
+  if (!forceShow && (selectedVehicle || spectatorMode)) {
     document.getElementById('vehicle-select-overlay').classList.add('hidden');
     updateVehicleHeader();
     return;
@@ -1017,6 +1024,21 @@ async function renderVehicleButtons() {
   ];
 
   listEl.innerHTML = '';
+
+  // 「閲覧のみ」ボタン（最上部・重複選択可）
+  const spectatorBtn = document.createElement('button');
+  spectatorBtn.className = 'vehicle-btn spectator-btn';
+  spectatorBtn.innerHTML = `
+    <span style="font-size:1.2rem;">👁</span>
+    閲覧のみ（傍観モード）
+    <span class="vc-status" style="color:#38a169;font-weight:600;">重複可</span>`;
+  spectatorBtn.onclick = () => selectSpectatorMode();
+  listEl.appendChild(spectatorBtn);
+
+  const sep = document.createElement('hr');
+  sep.className = 'spectator-sep';
+  listEl.appendChild(sep);
+
   vehicleList.forEach(({ name: vehicleName, colorIdx }) => {
     const color   = VEHICLE_COLORS[colorIdx % VEHICLE_COLORS.length];
     const isInUse = inUseSet.has(vehicleName) && vehicleName !== selectedVehicle;
@@ -1033,8 +1055,30 @@ async function renderVehicleButtons() {
   });
 }
 
+function selectSpectatorMode() {
+  // 既存の車両登録があればinUseをクリア
+  if (selectedVehicle && !spectatorMode) {
+    DEVICES_COL.doc(selectedVehicle).update({ inUse: false }).catch(() => {});
+  }
+  selectedVehicle = null;
+  spectatorMode   = true;
+  localStorage.removeItem('patrol_vehicle');
+  localStorage.removeItem('patrol_vehicle_idx');
+  localStorage.setItem('patrol_spectator', '1');
+
+  document.getElementById('vehicle-select-overlay').classList.add('hidden');
+  updateVehicleHeader();
+  setMode('collect');
+  showToast('👁 閲覧のみモード（傍観モード）で開始します');
+}
+
 async function selectVehicle(vehicleName, colorIdx) {
   document.getElementById('vehicle-select-warn').textContent = '';
+  // 傍観モードから車両選択へ切り替え
+  if (spectatorMode) {
+    spectatorMode = false;
+    localStorage.removeItem('patrol_spectator');
+  }
 
   // 他端末が使用中でないか再確認
   try {
@@ -1067,11 +1111,25 @@ async function selectVehicle(vehicleName, colorIdx) {
 function updateVehicleHeader() {
   const btn = document.getElementById('btn-change-vehicle');
   const lbl = document.getElementById('vehicle-label-header');
-  if (selectedVehicle) {
+  if (spectatorMode) {
+    lbl.textContent = '👁 閲覧のみ';
+    btn.style.display = '';
+    btn.style.borderColor = 'rgba(255,255,255,0.5)';
+  } else if (selectedVehicle) {
     lbl.textContent = selectedVehicle;
     btn.style.display = '';
     btn.style.borderColor = 'rgba(255,255,255,0.5)';
   }
+  updateEditModeBtn();
+}
+
+function updateEditModeBtn() {
+  const btnEdit = document.getElementById('btn-mode-edit');
+  if (!btnEdit) return;
+  btnEdit.disabled = spectatorMode;
+  btnEdit.style.opacity  = spectatorMode ? '0.35' : '';
+  btnEdit.style.cursor   = spectatorMode ? 'not-allowed' : '';
+  btnEdit.title          = spectatorMode ? '閲覧のみモードでは使用不可' : '';
 }
 
 
@@ -1488,6 +1546,10 @@ function onMarkerDragEnd(cp) {
    ================================================================ */
 
 function setMode(mode) {
+  if (mode === 'edit' && spectatorMode) {
+    showToast('⚠️ 閲覧のみモードでは追加モードは使用できません');
+    return;
+  }
   currentMode = mode;
 
   const modeBar    = document.getElementById('mode-bar');
@@ -1646,11 +1708,13 @@ function makeGpsCarIcon(color) {
    ================================================================ */
 
 function startGpsDeviceWrite() {
+  if (spectatorMode) return; // 傍観モードでは書き込みしない
   if (gpsWriteIntervalId) clearInterval(gpsWriteIntervalId);
   gpsWriteIntervalId = setInterval(writeDeviceGps, GPS_WRITE_INTERVAL);
 }
 
 async function writeDeviceGps() {
+  if (spectatorMode) return; // 傍観モードでは書き込みしない
   if (!selectedVehicle || currentLat == null) return;
 
   // Firestoreはネスト配列非対応のためオブジェクト配列形式で保存
@@ -1677,10 +1741,9 @@ async function writeDeviceGps() {
   }
 }
 
-// ページ離脱時にinUseをfalseに
+// ページ離脱時にinUseをfalseに（傍観モードは書き込みなし）
 window.addEventListener('beforeunload', () => {
-  if (selectedVehicle) {
-    // sendBeacon相当（非同期だが最善）
+  if (selectedVehicle && !spectatorMode) {
     DEVICES_COL.doc(selectedVehicle).update({ inUse: false }).catch(() => {});
   }
 });
