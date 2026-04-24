@@ -2230,7 +2230,10 @@ function focusPoint(id) {
 function bulkCheckFolder(folderId, e) {
   e.stopPropagation();
   const targets = checkpoints.filter(c => c.folderId === folderId && !c.checked);
-  if (targets.length === 0) { showToast('⚠️ チェック済みのポイントはありません'); return; }
+  if (targets.length === 0) { showToast('⚠️ 未チェックのポイントはありません'); return; }
+  const folder = folders.find(f => f.id === folderId);
+  const folderName = folder ? folder.name : '';
+  if (!confirm(`【${folderName}】の未チェック ${targets.length} 件を一括チェックします。\nよろしいですか？`)) return;
   const now = new Date().toLocaleString('ja-JP');
   targets.forEach(cp => {
     cp.checked = true; cp.checkedAt = now;
@@ -2246,6 +2249,9 @@ function bulkUncheckFolder(folderId, e) {
   e.stopPropagation();
   const targets = checkpoints.filter(c => c.folderId === folderId && c.checked);
   if (targets.length === 0) { showToast('⚠️ チェック済みのポイントがありません'); return; }
+  const folder = folders.find(f => f.id === folderId);
+  const folderName = folder ? folder.name : '';
+  if (!confirm(`【${folderName}】のチェック済み ${targets.length} 件を一括取り消しします。\nよろしいですか？`)) return;
   targets.forEach(cp => {
     cp.checked = false; cp.checkedAt = null;
     cp.marker.setIcon(makeIcon(false));
