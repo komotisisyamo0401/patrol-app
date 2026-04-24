@@ -1584,12 +1584,13 @@ function startGpsDeviceWrite() {
 async function writeDeviceGps() {
   if (!selectedVehicle || currentLat == null) return;
 
-  // 軌跡最新200点
-  const slim = trackPoints.slice(-MAX_TRACK_POINTS).map(p => [
-    Math.round(p.lat * 1e5) / 1e5,
-    Math.round(p.lng * 1e5) / 1e5,
-    p.ts,
-  ]);
+  // Firestoreはネスト配列非対応のためオブジェクト配列形式で保存
+  // [lat, lng, ts][] → {a, b, c}[]
+  const slim = trackPoints.slice(-MAX_TRACK_POINTS).map(p => ({
+    a: Math.round(p.lat * 1e5) / 1e5,
+    b: Math.round(p.lng * 1e5) / 1e5,
+    c: p.ts,
+  }));
 
   try {
     await DEVICES_COL.doc(selectedVehicle).set({
@@ -1601,7 +1602,10 @@ async function writeDeviceGps() {
       track:     slim,
       inUse:     true,
     });
-  } catch(e) { console.warn('GPS書き込みエラー:', e); }
+  } catch(e) {
+    console.warn('GPS書き込みエラー:', e);
+    showToast('⚠️ 位置情報の送信失敗: ' + (e.code || e.message || e));
+  }
 }
 
 // ページ離脱時にinUseをfalseに
@@ -1683,7 +1687,12 @@ function renderOtherDeviceTrack(vid, rawTrack, color, isOfflineWarn) {
 
   if (rawTrack.length < 2) return;
 
-  const pts = rawTrack.map(p => ({ lat: p[0], lng: p[1], ts: p[2] }));
+  // 新形式 {a,b,c} と旧形式 [lat,lng,ts] の両方に対応
+  const pts = rawTrack.map(p =>
+    Array.isArray(p)
+      ? { lat: p[0], lng: p[1], ts: p[2] }
+      : { lat: p.a,  lng: p.b,  ts: p.c  }
+  );
   const baseOpacity = isOfflineWarn ? 0.25 : 0.72;
   const otherStopColor = desaturateHalf(color);
 
