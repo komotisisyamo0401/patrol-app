@@ -157,32 +157,22 @@
     .hint-collect { background: #f0fff4; border: 1px solid #c6f6d5; color: #276749; }
     .mode-hint strong { display: block; margin-bottom: 4px; }
 
-    #folder-selector-wrap {
-      background: #f7fafc;
-      border: 1px solid #e2e8f0;
-      border-radius: 8px;
-      padding: 8px 12px;
+    .folder-drag-handle {
+      cursor: grab;
+      font-size: 1.1rem;
+      color: #a0aec0;
+      padding: 0 6px 0 0;
+      display: flex;
+      align-items: center;
       flex-shrink: 0;
+      touch-action: none;
+      user-select: none;
+      line-height: 1;
     }
-    #folder-selector-wrap label {
-      font-size: 0.78rem;
-      font-weight: 700;
-      color: #4a5568;
-      display: block;
-      margin-bottom: 5px;
-    }
-    #folder-selector {
-      width: 100%;
-      border: 1px solid #cbd5e0;
-      border-radius: 6px;
-      padding: 6px 8px;
-      font-size: 0.85rem;
-      background: white;
-      color: #2d3748;
-      outline: none;
-      cursor: pointer;
-    }
-    #folder-selector:focus { border-color: #3182ce; }
+    .folder-drag-handle:active { cursor: grabbing; color: #4a5568; }
+    .folder-section.folder-dragging { opacity: 0.35; box-shadow: none; }
+    .folder-section.folder-drag-over-top    { border-top: 2px solid #3182ce !important; }
+    .folder-section.folder-drag-over-bottom { border-bottom: 2px solid #3182ce !important; }
 
     .progress-wrap {
       background: #edf2f7;
@@ -884,13 +874,7 @@
 
       <div id="mode-hint" class="mode-hint hint-edit">
         <strong>📍 追加モード</strong>
-        フォルダを選択し、地図をクリックしてチェックポイントを追加してください。
-      </div>
-
-      <div id="folder-selector-wrap">
-        <label>📁 追加先フォルダ</label>
-        <select id="folder-selector" onchange="activeFolderId = parseInt(this.value); renderList();">
-        </select>
+        フォルダをタップして追加先を選択し、地図をクリックしてチェックポイントを追加してください。
       </div>
 
       <div class="progress-wrap">
@@ -1558,7 +1542,6 @@ function setMode(mode) {
   const btnEdit    = document.getElementById('btn-mode-edit');
   const btnCollect = document.getElementById('btn-mode-collect');
   const hintEl     = document.getElementById('mode-hint');
-  const selectorWrap = document.getElementById('folder-selector-wrap');
 
   if (mode === 'edit') {
     modeBar.className    = 'mode-edit';
@@ -1570,8 +1553,7 @@ function setMode(mode) {
     hintEl.className     = 'mode-hint hint-edit';
     hintEl.innerHTML     =
       '<strong>📍 追加モード</strong>' +
-      'フォルダを選択し、地図をクリックしてチェックポイントを追加してください。';
-    selectorWrap.style.display = '';
+      'フォルダをタップして追加先を選択し、地図をクリックしてチェックポイントを追加してください。';
     checkpoints.forEach(cp => { if (cp.marker && cp.marker.dragging) cp.marker.dragging.enable(); });
   } else {
     modeBar.className    = 'mode-collect';
@@ -1584,7 +1566,6 @@ function setMode(mode) {
     hintEl.innerHTML     =
       '<strong>🚛 回収モード</strong>' +
       'GPS円(10m)とCP円(12m)が接触し10秒間持続すると自動チェックされます。手動操作も可能です。';
-    selectorWrap.style.display = 'none';
     checkpoints.forEach(cp => { if (cp.marker && cp.marker.dragging) cp.marker.dragging.disable(); });
   }
 
@@ -2143,7 +2124,12 @@ function applyRenameFolder(folderId, newName) {
 function toggleFolder(folderId) {
   const folder = folders.find(f => f.id === folderId);
   if (!folder) return;
-  folder.collapsed = !folder.collapsed;
+  if (currentMode === 'edit') {
+    activeFolderId = folderId;
+    folder.collapsed = false;
+  } else {
+    folder.collapsed = !folder.collapsed;
+  }
   renderList();
   saveSharedData();
 }
@@ -2346,7 +2332,8 @@ function onCpDragEnd(e) {
 function reorderCpInList(fromId, toId, insertBefore) {
   const fromCp = checkpoints.find(c => c.id === fromId);
   const toCp   = checkpoints.find(c => c.id === toId);
-  if (!fromCp || !toCp || fromCp.folderId !== toCp.folderId) return;
+  if (!fromCp || !toCp) return;
+  fromCp.folderId = toCp.folderId;
   const fromIdx = checkpoints.indexOf(fromCp);
   checkpoints.splice(fromIdx, 1);
   const toIdx = checkpoints.indexOf(toCp);
@@ -2429,6 +2416,134 @@ function onCpTouchEnd(e) {
 
 
 /* ================================================================
+   フォルダのドラッグ並び替え（マウス＋タッチ）
+   ================================================================ */
+
+let _dragFolderId = null;
+
+function onFolderDragStart(e) {
+  _dragFolderId = parseInt(this.dataset.folderId);
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(() => this.classList.add('folder-dragging'), 0);
+}
+
+function onFolderDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const targetId = parseInt(this.dataset.folderId);
+  if (targetId === _dragFolderId) return;
+  const rect = this.getBoundingClientRect();
+  const isTop = e.clientY < rect.top + rect.height / 2;
+  this.classList.toggle('folder-drag-over-top',    isTop);
+  this.classList.toggle('folder-drag-over-bottom', !isTop);
+}
+
+function onFolderDragLeave(e) {
+  this.classList.remove('folder-drag-over-top', 'folder-drag-over-bottom');
+}
+
+function onFolderDrop(e) {
+  e.preventDefault();
+  const targetId = parseInt(this.dataset.folderId);
+  this.classList.remove('folder-drag-over-top', 'folder-drag-over-bottom');
+  if (_dragFolderId == null || targetId === _dragFolderId) return;
+  const rect = this.getBoundingClientRect();
+  const insertBefore = e.clientY < rect.top + rect.height / 2;
+  reorderFolderInList(_dragFolderId, targetId, insertBefore);
+}
+
+function onFolderDragEnd(e) {
+  document.querySelectorAll('.folder-section').forEach(s =>
+    s.classList.remove('folder-dragging', 'folder-drag-over-top', 'folder-drag-over-bottom')
+  );
+  _dragFolderId = null;
+}
+
+function reorderFolderInList(fromId, toId, insertBefore) {
+  const fromIdx = folders.findIndex(f => f.id === fromId);
+  if (fromIdx < 0) return;
+  const [moved] = folders.splice(fromIdx, 1);
+  const newToIdx = folders.findIndex(f => f.id === toId);
+  if (newToIdx < 0) { folders.splice(fromIdx, 0, moved); return; }
+  folders.splice(insertBefore ? newToIdx : newToIdx + 1, 0, moved);
+  renderList(); renderReport(); saveSharedData();
+}
+
+// タッチドラッグ用
+let _touchDragFolderId = null;
+let _touchDragFolderEl = null;
+let _touchFolderGhost  = null;
+let _touchFolderOffsetY = 0;
+
+function onFolderTouchStart(e) {
+  const section = this.closest('.folder-section');
+  if (!section) return;
+  _touchDragFolderId = parseInt(section.dataset.folderId);
+  _touchDragFolderEl = section;
+  const touch = e.touches[0];
+  const rect  = section.getBoundingClientRect();
+  _touchFolderOffsetY = touch.clientY - rect.top;
+
+  _touchFolderGhost = section.cloneNode(true);
+  _touchFolderGhost.style.cssText =
+    `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;` +
+    'opacity:0.7;pointer-events:none;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+  document.body.appendChild(_touchFolderGhost);
+  section.classList.add('folder-dragging');
+  e.preventDefault();
+}
+
+function onFolderTouchMove(e) {
+  if (!_touchFolderGhost) return;
+  const touch = e.touches[0];
+  _touchFolderGhost.style.top = (touch.clientY - _touchFolderOffsetY) + 'px';
+
+  _touchFolderGhost.style.display = 'none';
+  const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  _touchFolderGhost.style.display = '';
+
+  document.querySelectorAll('.folder-section').forEach(s =>
+    s.classList.remove('folder-drag-over-top', 'folder-drag-over-bottom')
+  );
+  const target = el && el.closest('.folder-section');
+  if (target) {
+    const targetId = parseInt(target.dataset.folderId);
+    if (targetId !== _touchDragFolderId) {
+      const rect = target.getBoundingClientRect();
+      const isTop = touch.clientY < rect.top + rect.height / 2;
+      target.classList.toggle('folder-drag-over-top',    isTop);
+      target.classList.toggle('folder-drag-over-bottom', !isTop);
+    }
+  }
+  e.preventDefault();
+}
+
+function onFolderTouchEnd(e) {
+  if (_touchFolderGhost) { _touchFolderGhost.remove(); _touchFolderGhost = null; }
+  if (_touchDragFolderEl) _touchDragFolderEl.classList.remove('folder-dragging');
+
+  const touch  = e.changedTouches[0];
+  const el     = document.elementFromPoint(touch.clientX, touch.clientY);
+  const target = el && el.closest('.folder-section');
+
+  document.querySelectorAll('.folder-section').forEach(s =>
+    s.classList.remove('folder-drag-over-top', 'folder-drag-over-bottom')
+  );
+
+  if (target && _touchDragFolderId != null) {
+    const targetId = parseInt(target.dataset.folderId);
+    if (targetId !== _touchDragFolderId) {
+      const rect = target.getBoundingClientRect();
+      const insertBefore = touch.clientY < rect.top + rect.height / 2;
+      reorderFolderInList(_touchDragFolderId, targetId, insertBefore);
+    }
+  }
+  _touchDragFolderId = null;
+  _touchDragFolderEl = null;
+}
+
+
+/* ================================================================
    一覧UIのレンダリング
    ================================================================ */
 
@@ -2441,12 +2556,9 @@ function renderList() {
   const pct = totalAll > 0 ? Math.round(doneAll / totalAll * 100) : 0;
   document.getElementById('progress-bar').style.width = pct + '%';
 
-  const sel = document.getElementById('folder-selector');
-  const prevVal = sel.value ? parseInt(sel.value) : activeFolderId;
-  sel.innerHTML = folders.map(f =>
-    `<option value="${f.id}" ${f.id === prevVal ? 'selected' : ''}>${escHtml(f.name)}</option>`
-  ).join('');
-  activeFolderId = parseInt(sel.value) || activeFolderId;
+  if (!folders.find(f => f.id === activeFolderId)) {
+    activeFolderId = folders[0]?.id ?? 1;
+  }
 
   const container = document.getElementById('folder-list');
   container.innerHTML = '';
@@ -2464,15 +2576,10 @@ function renderList() {
       (folder.collapsed ? ' collapsed' : '') +
       (!isVisible ? ' folder-hidden' : '') +
       (folder.id === activeFolderId && currentMode === 'edit' ? ' active-folder' : '');
+    section.dataset.folderId = folder.id;
 
-    const folderIdx     = folders.findIndex(f => f.id === folder.id);
     const folderEditBtns = currentMode === 'edit'
-      ? `<button class="btn-move"
-           onclick="moveFolder(${folder.id}, -1, event)"
-           ${folderIdx === 0 ? 'disabled' : ''}>▲</button>
-         <button class="btn-move"
-           onclick="moveFolder(${folder.id}, 1, event)"
-           ${folderIdx === folders.length - 1 ? 'disabled' : ''}>▼</button>
+      ? `<div class="folder-drag-handle" onclick="event.stopPropagation()" title="ドラッグで並び替え">⠿</div>
          <button class="btn-folder-rename"
            onclick="startRenameFolder(${folder.id}, event)">名前変更</button>`
       : '';
@@ -2502,6 +2609,21 @@ function renderList() {
       </div>
       <div class="folder-content" id="folder-content-${folder.id}"></div>`;
 
+    if (currentMode === 'edit') {
+      section.setAttribute('draggable', 'true');
+      section.addEventListener('dragstart', onFolderDragStart);
+      section.addEventListener('dragover',  onFolderDragOver);
+      section.addEventListener('dragleave', onFolderDragLeave);
+      section.addEventListener('drop',      onFolderDrop);
+      section.addEventListener('dragend',   onFolderDragEnd);
+      const handle = section.querySelector('.folder-drag-handle');
+      if (handle) {
+        handle.addEventListener('touchstart', onFolderTouchStart, { passive: false });
+        handle.addEventListener('touchmove',  onFolderTouchMove,  { passive: false });
+        handle.addEventListener('touchend',   onFolderTouchEnd);
+      }
+    }
+
     container.appendChild(section);
 
     const contentEl = document.getElementById(`folder-content-${folder.id}`);
@@ -2510,7 +2632,7 @@ function renderList() {
       contentEl.innerHTML =
         `<div class="folder-empty">${
           currentMode === 'edit'
-            ? 'このフォルダを選択して地図をクリックしてください'
+            ? 'このフォルダをタップして選択し、地図をクリックしてください'
             : 'チェックポイントがありません'
         }</div>`;
     } else {
