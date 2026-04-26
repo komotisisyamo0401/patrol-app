@@ -3,7 +3,17 @@
     "allow": [
       "Bash(python3 -c ' *)",
       "Bash(python -c ' *)",
-      "Bash(powershell *)"
+      "Bash(powershell *)",
+      "Bash(grep -v \"//.*function\\\\|checkbox\\\\|onclick\\\\|class\\\\|style\\\\|btn\\\\|div\\\\|span\\\\|if\\\\|const\\\\|let\\\\|var\\\\|return\\\\|forEach\\\\|filter\\\\|find\")",
+      "Bash(python -c \"import docx; print\\('docx ok'\\)\")",
+      "Bash(python3 -c \"import docx; print\\('docx ok'\\)\")",
+      "Bash(py --version)",
+      "Bash(py -3 --version)",
+      "PowerShell(Get-Command *)",
+      "PowerShell(& \"C:\\\\Users\\\\haira\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\python.exe\" --version 2>&1)",
+      "PowerShell(try { $word = New-Object -ComObject Word.Application; $word.Quit\\(\\); Write-Output \"Word COM available\" } catch { Write-Output \"Word COM not available: $_\" })",
+      "PowerShell(& \"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\" -NonInteractive -File \"C:\\\\Users\\\\haira\\\\patrol-app\\\\make_manual.ps1\" 2>&1)",
+      "PowerShell(& \"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\" -NonInteractive -File \"C:\\\\Users\\\\haira\\\\patrol-app\\\\build_docx.ps1\" 2>&1)"
     ]
   }
 }

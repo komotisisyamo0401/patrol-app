@@ -689,6 +689,7 @@
     }
     .cp-popup-btn.check   { background: #38a169; color: white; }
     .cp-popup-btn.uncheck { background: #e53e3e; color: white; }
+    .cp-popup-time { font-size: 0.7rem; color: #38a169; margin-bottom: 6px; }
 
     .admin-section-title {
       font-size: 0.78rem; font-weight: 700; color: #718096;
@@ -1973,6 +1974,28 @@ setInterval(() => {
   });
 }, 60000); // 1分ごとにチェック
 
+// 毎日8:30 JST に全チェックポイントを自動リセット
+let lastAutoUncheckDate = '';
+setInterval(() => {
+  const now = new Date(Date.now() + 9 * 3600000); // JST換算
+  if (now.getUTCHours() === 8 && now.getUTCMinutes() === 20) {
+    const today = now.toISOString().slice(0, 10);
+    if (lastAutoUncheckDate === today) return; // 同分内の多重実行防止
+    lastAutoUncheckDate = today;
+    const targets = checkpoints.filter(c => c.checked);
+    if (targets.length === 0) return;
+    targets.forEach(cp => {
+      cp.checked = false; cp.checkedAt = null;
+      cp.marker.setIcon(makeIcon(false));
+      cp.marker.setPopupContent(makePopupHtml(cp));
+      delete contactStartTimes[cp.id];
+    });
+    renderList(); renderReport();
+    saveLocalCheckStates(); saveCheckStatesToFirestore();
+    showToast(`🔄 8:20 自動リセット: ${targets.length}件のチェックを解除しました`);
+  }
+}, 60000);
+
 // 毎日23:59 JST に軌跡を自動削除
 setInterval(async () => {
   const now = new Date(Date.now() + 9 * 3600000); // JST
@@ -3003,10 +3026,14 @@ function makePopupHtml(cp) {
   const actionBtn = cp.checked
     ? `<button class="cp-popup-btn uncheck" onclick="uncheckPoint(${cp.id});this.closest('.leaflet-popup').querySelector && map.closePopup()">取り消し</button>`
     : `<button class="cp-popup-btn check"   onclick="checkPoint(${cp.id},false);map.closePopup()">チェック</button>`;
+  const timeRow = cp.checked && cp.checkedAt
+    ? `<div class="cp-popup-time">✅ ${escHtml(cp.checkedAt)}</div>`
+    : '';
   return `
     <div class="cp-popup">
       <div class="cp-popup-name">${escHtml(cp.name)}</div>
       <div class="cp-popup-coord">${cp.lat.toFixed(5)}, ${cp.lng.toFixed(5)}</div>
+      ${timeRow}
       <div class="cp-popup-actions">${actionBtn}</div>
     </div>`;
 }
