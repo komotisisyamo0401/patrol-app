@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gomi-kaishuu-v1';
+const CACHE_NAME = 'gomi-kaishuu-v2';
 const STATIC_ASSETS = [
   './index.html',
   './manifest.json',
@@ -37,7 +37,20 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // ローカルリソースはキャッシュ優先、失敗時はネットワーク
+  // index.html はネットワーク優先（更新を即座に反映）、失敗時はキャッシュ
+  if (url.pathname.endsWith('/') || url.pathname.endsWith('index.html')) {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, response.clone()));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // その他のローカルリソース（アイコン等）はキャッシュ優先
   event.respondWith(
     caches.match(event.request).then(cached => cached || fetch(event.request))
   );
