@@ -95,6 +95,36 @@
     }
     #mode-badge.mode-edit    { background: #bee3f8; color: #2c5282; }
     #mode-badge.mode-collect { background: #c6f6d5; color: #276749; }
+    #mode-bar.mode-review  { border-color: #9f7aea; background: #faf5ff; }
+    .mode-btn.active-review { color: #6b46c1; }
+    #mode-badge.mode-review { background: #e9d8fd; color: #553c9a; }
+
+    .review-file-group {
+      background: #faf5ff; border: 1px solid #e9d8fd;
+      border-radius: 8px; padding: 12px; flex-shrink: 0;
+    }
+    .review-file-title { font-size: 0.78rem; font-weight: 700; color: #553c9a; margin-bottom: 8px; }
+    .btn-review-import {
+      display: inline-block; padding: 5px 12px;
+      background: #6b46c1; color: white; border: none;
+      border-radius: 6px; font-size: 0.8rem; font-weight: 600; cursor: pointer;
+    }
+    .btn-review-import:hover { opacity: 0.85; }
+    .review-status { font-size: 0.75rem; color: #718096; margin-top: 6px; min-height: 18px; }
+    .btn-review-clear {
+      padding: 4px 12px; border: 1px solid #9f7aea; border-radius: 6px;
+      background: white; font-size: 0.78rem; cursor: pointer; color: #6b46c1;
+    }
+    .btn-review-clear:hover { background: #faf5ff; }
+    .review-vehicle-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 5px 8px; background: #f7fafc; border-radius: 6px;
+      font-size: 0.8rem; margin-bottom: 4px;
+    }
+    .review-folder-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 5px 0; font-size: 0.8rem; border-bottom: 1px solid #e2e8f0;
+    }
 
     .main {
       display: flex;
@@ -956,6 +986,8 @@
   <button class="mode-btn active-edit"  id="btn-mode-edit"    onclick="setMode('edit')">📍 追加モード</button>
   <div style="width:1px;background:#e2e8f0;margin:6px 0;"></div>
   <button class="mode-btn"              id="btn-mode-collect" onclick="setMode('collect')">🚛 回収モード</button>
+  <div style="width:1px;background:#e2e8f0;margin:6px 0;"></div>
+  <button class="mode-btn"              id="btn-mode-review"  onclick="setMode('review')">🔍 確認モード</button>
 </div>
 
 <div class="main">
@@ -967,6 +999,7 @@
     <div class="tab-bar">
       <button class="tab-btn active" onclick="switchTab('list', event)">📋 一覧</button>
       <button class="tab-btn"        onclick="switchTab('report', event)">📊 レポート</button>
+      <button class="tab-btn"        onclick="switchTab('review', event)">🔍 確認</button>
     </div>
 
     <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="importCsv(this)">
@@ -1002,6 +1035,29 @@
       <div id="report-list"></div>
       <div id="report-footer"
            style="font-size:0.72rem;color:#a0aec0;text-align:right;margin-top:4px;"></div>
+    </div>
+
+    <div id="tab-review" class="tab-content">
+      <div class="review-file-group">
+        <div class="review-file-title">📋 チェックデータCSV</div>
+        <button class="btn-review-import"
+                onclick="document.getElementById('review-check-input').click()">📂 ファイルを選択</button>
+        <input type="file" id="review-check-input" accept=".csv" style="display:none"
+               onchange="importReviewCheckCsv(this)">
+        <div class="review-status" id="review-check-status">未読み込み</div>
+      </div>
+      <div class="review-file-group">
+        <div class="review-file-title">🗺️ 走行軌跡CSV</div>
+        <button class="btn-review-import"
+                onclick="document.getElementById('review-track-input').click()">📂 ファイルを選択</button>
+        <input type="file" id="review-track-input" accept=".csv" style="display:none"
+               onchange="importReviewTrackCsv(this)">
+        <div class="review-status" id="review-track-status">未読み込み</div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:4px;">
+        <button class="btn-review-clear" onclick="clearReviewAll()">🗑️ 全クリア</button>
+      </div>
+      <div id="review-summary"></div>
     </div>
 
   </div>
@@ -1286,6 +1342,11 @@ let renamingPointId  = null;
 let renamingFolderId = null;
 
 let toastTimer = null;
+
+let reviewTrackData   = {};  // { vid: [{lat, lng, time}, ...] }
+let reviewCheckData   = [];  // [{ folder, name, done, time }, ...]
+let reviewTrackLayers = {};  // { vid: [polyline, ...] }
+let reviewCheckLayers = [];  // [circleMarker, ...]
 
 
 /* ================================================================
@@ -1649,6 +1710,7 @@ function setMode(mode) {
     showToast('⚠️ 閲覧のみモードでは追加モードは使用できません');
     return;
   }
+  if (currentMode === 'review' && mode !== 'review') hideReviewLayers();
   currentMode = mode;
 
   const modeBar    = document.getElementById('mode-bar');
@@ -1656,6 +1718,7 @@ function setMode(mode) {
   const badge      = document.getElementById('mode-badge');
   const btnEdit    = document.getElementById('btn-mode-edit');
   const btnCollect = document.getElementById('btn-mode-collect');
+  const btnReview  = document.getElementById('btn-mode-review');
   const hintEl     = document.getElementById('mode-hint');
 
   if (mode === 'edit') {
@@ -1665,11 +1728,28 @@ function setMode(mode) {
     badge.textContent    = '追加モード';
     btnEdit.className    = 'mode-btn active-edit';
     btnCollect.className = 'mode-btn';
+    if (btnReview) btnReview.className = 'mode-btn';
     hintEl.className     = 'mode-hint hint-edit';
+    hintEl.removeAttribute('style');
     hintEl.innerHTML     =
       '<strong>📍 追加モード</strong>' +
       'フォルダをタップして追加先を選択し、地図をクリックしてチェックポイントを追加してください。';
     checkpoints.forEach(cp => { if (cp.marker && cp.marker.dragging) cp.marker.dragging.enable(); });
+  } else if (mode === 'review') {
+    modeBar.className    = 'mode-review';
+    mapEl.className      = 'mode-collect';
+    badge.className      = 'mode-review';
+    badge.textContent    = '確認モード';
+    btnEdit.className    = 'mode-btn';
+    btnCollect.className = 'mode-btn';
+    if (btnReview) btnReview.className = 'mode-btn active-review';
+    hintEl.className     = 'mode-hint';
+    hintEl.style.cssText = 'background:#faf5ff;border:1px solid #e9d8fd;color:#553c9a;border-radius:8px;padding:10px 14px;font-size:0.82rem;flex-shrink:0;';
+    hintEl.innerHTML     =
+      '<strong>🔍 確認モード</strong>CSVをインポートして走行軌跡とチェック結果を地図で確認できます。';
+    checkpoints.forEach(cp => { if (cp.marker && cp.marker.dragging) cp.marker.dragging.disable(); });
+    showReviewLayers();
+    switchTab('review');
   } else {
     modeBar.className    = 'mode-collect';
     mapEl.className      = 'mode-collect';
@@ -1677,7 +1757,9 @@ function setMode(mode) {
     badge.textContent    = '回収モード';
     btnEdit.className    = 'mode-btn';
     btnCollect.className = 'mode-btn active-collect';
+    if (btnReview) btnReview.className = 'mode-btn';
     hintEl.className     = 'mode-hint hint-collect';
+    hintEl.removeAttribute('style');
     hintEl.innerHTML     =
       '<strong>🚛 回収モード</strong>' +
       'GPS円(10m)とCP円(12m)が接触し10秒間持続すると自動チェックされます。手動操作も可能です。';
@@ -2645,6 +2727,157 @@ function exportTrackCsv() {
 
 
 /* ================================================================
+   レポート確認モード
+   ================================================================ */
+
+function hideReviewLayers() {
+  Object.values(reviewTrackLayers).flat().forEach(l => { try { map.removeLayer(l); } catch(e) {} });
+  reviewTrackLayers = {};
+  reviewCheckLayers.forEach(l => { try { map.removeLayer(l); } catch(e) {} });
+  reviewCheckLayers = [];
+}
+
+function showReviewLayers() {
+  hideReviewLayers();
+  const colors = ['#e53e3e','#dd6b20','#d69e2e','#38a169','#319795','#3182ce','#6b46c1','#d53f8c'];
+  let ci = 0;
+  Object.entries(reviewTrackData).forEach(([vid, pts]) => {
+    if (pts.length < 2) return;
+    const color = colors[ci++ % colors.length];
+    const poly = L.polyline(pts.map(p => [p.lat, p.lng]), {
+      color, weight: 3, opacity: 0.85, dashArray: '8, 6',
+    }).addTo(map).bindTooltip(vid, { sticky: true });
+    if (!reviewTrackLayers[vid]) reviewTrackLayers[vid] = [];
+    reviewTrackLayers[vid].push(poly);
+  });
+  reviewCheckData.forEach(item => {
+    const cp = checkpoints.find(c => {
+      const f = folders.find(fo => fo.id === c.folderId);
+      return f && f.name === item.folder && c.name === item.name;
+    });
+    if (!cp) return;
+    const color = item.done ? '#38a169' : '#e53e3e';
+    const circle = L.circleMarker([cp.lat, cp.lng], {
+      radius: 14, fillColor: color, fillOpacity: 0.35,
+      color, weight: 2.5, opacity: 0.9,
+    }).addTo(map).bindTooltip(
+      `${item.done ? '✅' : '❌'} ${escHtml(item.name)}${item.time ? '<br>' + escHtml(item.time) : ''}`,
+      { sticky: true }
+    );
+    reviewCheckLayers.push(circle);
+  });
+}
+
+function importReviewCheckCsv(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const text = e.target.result.replace(/^﻿/, '');
+      const lines = text.split(/\r\n|\r|\n/).filter(l => l.trim());
+      if (lines.length < 2) { showToast('⚠️ データが見つかりません'); return; }
+      const rows = lines.slice(1).map(parseCsvLine).filter(r => r.length >= 4);
+      if (rows.length === 0) { showToast('⚠️ 有効な行がありません'); return; }
+      reviewCheckData = rows.map(r => ({
+        folder: r[1] || '',
+        name:   r[2] || '',
+        done:   (r[3] || '') === '完了',
+        time:   r[4] || '',
+      }));
+      const done = reviewCheckData.filter(d => d.done).length;
+      document.getElementById('review-check-status').textContent =
+        `${rows.length}件読み込み済み（完了: ${done}件, 未完了: ${rows.length - done}件）`;
+      if (currentMode === 'review') showReviewLayers();
+      renderReviewSummary();
+      showToast(`✅ チェックデータを${rows.length}件読み込みました`);
+    } catch(err) {
+      showToast('❌ チェックデータCSVの読み込みに失敗しました');
+    }
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+function importReviewTrackCsv(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const text = e.target.result.replace(/^﻿/, '');
+      const lines = text.split(/\r\n|\r|\n/).filter(l => l.trim());
+      if (lines.length < 2) { showToast('⚠️ データが見つかりません'); return; }
+      const rows = lines.slice(1).map(parseCsvLine).filter(r => r.length >= 3);
+      if (rows.length === 0) { showToast('⚠️ 有効な行がありません'); return; }
+      reviewTrackData = {};
+      rows.forEach(r => {
+        const vid = r[0] || '不明';
+        const lat = parseFloat(r[1]);
+        const lng = parseFloat(r[2]);
+        const time = r[3] || '';
+        if (isNaN(lat) || isNaN(lng)) return;
+        if (!reviewTrackData[vid]) reviewTrackData[vid] = [];
+        reviewTrackData[vid].push({ lat, lng, time });
+      });
+      const vehicleCount = Object.keys(reviewTrackData).length;
+      const ptCount = Object.values(reviewTrackData).reduce((s, a) => s + a.length, 0);
+      document.getElementById('review-track-status').textContent =
+        `${vehicleCount}台・${ptCount}点読み込み済み`;
+      if (currentMode === 'review') showReviewLayers();
+      renderReviewSummary();
+      showToast(`✅ 走行軌跡を${ptCount}点読み込みました`);
+    } catch(err) {
+      showToast('❌ 走行軌跡CSVの読み込みに失敗しました');
+    }
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+function clearReviewAll() {
+  hideReviewLayers();
+  reviewTrackData = {}; reviewCheckData = [];
+  document.getElementById('review-check-status').textContent = '未読み込み';
+  document.getElementById('review-track-status').textContent = '未読み込み';
+  document.getElementById('review-summary').innerHTML = '';
+  showToast('🗑️ インポートデータをクリアしました');
+}
+
+function renderReviewSummary() {
+  const el = document.getElementById('review-summary');
+  if (!el) return;
+  let html = '';
+
+  if (Object.keys(reviewTrackData).length > 0) {
+    html += '<div style="font-size:0.78rem;font-weight:700;color:#553c9a;margin:10px 0 6px;padding-bottom:4px;border-bottom:1px solid #e9d8fd">🗺️ 走行軌跡</div>';
+    Object.entries(reviewTrackData).forEach(([vid, pts]) => {
+      html += `<div class="review-vehicle-item">🚛 ${escHtml(vid)}<span style="margin-left:auto;color:#718096">${pts.length}pt</span></div>`;
+    });
+  }
+
+  if (reviewCheckData.length > 0) {
+    html += '<div style="font-size:0.78rem;font-weight:700;color:#553c9a;margin:10px 0 6px;padding-bottom:4px;border-bottom:1px solid #e9d8fd">📋 チェック記録</div>';
+    const byFolder = {};
+    reviewCheckData.forEach(item => {
+      if (!byFolder[item.folder]) byFolder[item.folder] = { done: 0, total: 0 };
+      byFolder[item.folder].total++;
+      if (item.done) byFolder[item.folder].done++;
+    });
+    Object.entries(byFolder).forEach(([folder, stats]) => {
+      const all = stats.done === stats.total;
+      html += `<div class="review-folder-row">
+        <span>📁 ${escHtml(folder)}</span>
+        <span style="color:${all ? '#276749' : '#c53030'};font-weight:600">${stats.done}/${stats.total}</span>
+      </div>`;
+    });
+  }
+
+  el.innerHTML = html;
+}
+
+
+/* ================================================================
    モーダル管理
    ================================================================ */
 
@@ -3413,6 +3646,7 @@ function switchTab(tabName, e) {
   document.getElementById('tab-' + tabName).classList.add('active');
   if (e && e.target) e.target.classList.add('active');
   if (tabName === 'report') renderReport();
+  if (tabName === 'review') renderReviewSummary();
 }
 
 
