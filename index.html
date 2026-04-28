@@ -689,6 +689,7 @@
       font-size: 0.72rem; font-weight: 600; cursor: pointer;
     }
     .btn-kick:hover { opacity: 0.8; }
+    .btn-kick-logout { background: #744210; }
     .btn-admin-close {
       padding: 4px 12px; border: 1px solid #cbd5e0;
       border-radius: 6px; background: white; cursor: pointer; font-size: 0.82rem;
@@ -884,11 +885,9 @@
     </h2>
     <div style="font-size:0.72rem;color:#718096;margin-bottom:10px">🕐 保存期限72時間</div>
     <div class="backup-controls">
-      <input type="date" id="backup-date-input" />
-      <button class="backup-slot-btn active" id="bslot-1200" onclick="selectBackupSlot(this,'1200')">12:00</button>
-      <button class="backup-slot-btn"         id="bslot-1600" onclick="selectBackupSlot(this,'1600')">16:00</button>
-      <button class="btn-admin-action" onclick="loadBackupSlot()">📂 読み込む</button>
+      <input type="date" id="backup-date-input" onchange="refreshBackupSlots(this.value)" />
     </div>
+    <div id="backup-slot-list" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;min-height:28px;"></div>
     <div id="backup-data"></div>
   </div>
 </div>
@@ -945,7 +944,7 @@
     </div>
 
     <!-- CSV -->
-    <div class="admin-section-title" style="margin-top:14px">📄 CSV</div>
+    <div class="admin-section-title" style="margin-top:14px">📄 チェックポイント設定CSV</div>
     <div class="admin-action-row">
       <button class="btn-admin-action" onclick="exportCsv()">📥 CSVエクスポート</button>
       <button class="btn-admin-action" onclick="document.getElementById('csv-file-input').click()">📤 CSVインポート</button>
@@ -996,6 +995,7 @@
     <div id="tab-report" class="tab-content">
       <div class="report-header">
         <h3>点検レポート</h3>
+        <button class="btn-backup" onclick="takeManualBackup()" id="btn-manual-backup">💾 手動バックアップ</button>
         <button class="btn-backup" onclick="openBackupViewer()">📦 バックアップ記録</button>
       </div>
       <div class="report-summary" id="report-summary"></div>
@@ -1057,12 +1057,13 @@ let selectedVehicle  = localStorage.getItem('patrol_vehicle') || null;  // e.g. 
 let selectedColorIdx = parseInt(localStorage.getItem('patrol_vehicle_idx') || '0');
 let spectatorMode    = (localStorage.getItem('patrol_spectator') === '1'); // 傍観モード
 let gpsWriteIntervalId = null;
+let trackSentUpTo = 0;
 let otherDevices = {};   // { vehicleId: { marker, segments:[], stopMarkers:[], lastSeen, color } }
 let devicesUnsubscribe = null;
 const OFFLINE_WARN_MS  = 30 * 60 * 1000;  // 30分
 const OFFLINE_KICK_MS  = 60 * 60 * 1000;  // 60分
 const GPS_WRITE_INTERVAL = 6000;           // 6秒
-const MAX_TRACK_POINTS = 200;
+const MAX_TRACK_POINTS = 5000;
 const STOP_DETECT_MS = 7000;              // 停止判定：7秒
 const AUTO_CHECK_DIST = 22;               // 自動チェック接触距離(m)：GPS円10m＋CP円12m
 const AUTO_CHECK_HOLD = 10000;            // 自動チェック持続時間(ms)
@@ -1242,7 +1243,7 @@ function createDefaultFolders() {
   return DEFAULT_FOLDER_NAMES.map((name, i) => ({
     id: i + 1,
     name,
-    collapsed: i > 0,
+    collapsed: true,
     visible: true,
   }));
 }
@@ -1498,7 +1499,7 @@ function applySharedData(data) {
     folders = data.folders.map(f => ({
       ...f,
       visible: localVis.hasOwnProperty(f.id) ? localVis[f.id] : true,
-      collapsed: localCollapsed.hasOwnProperty(f.id) ? localCollapsed[f.id] : (f.collapsed || false),
+      collapsed: localCollapsed.hasOwnProperty(f.id) ? localCollapsed[f.id] : true,
     }));
   }
 
@@ -1812,27 +1813,53 @@ async function writeDeviceGps() {
   if (spectatorMode) return; // 傍観モードでは書き込みしない
   if (!selectedVehicle || currentLat == null) return;
 
-  // Firestoreはネスト配列非対応のためオブジェクト配列形式で保存
-  // [lat, lng, ts][] → {a, b, c}[]
-  const slim = trackPoints.slice(-MAX_TRACK_POINTS).map(p => ({
+  const toSlim = pts => pts.map(p => ({
     a: Math.round(p.lat * 1e5) / 1e5,
     b: Math.round(p.lng * 1e5) / 1e5,
     c: p.ts,
   }));
 
-  try {
-    await DEVICES_COL.doc(selectedVehicle).set({
-      vehicleId: selectedVehicle,
-      colorIdx:  selectedColorIdx,
-      lat:       currentLat,
-      lng:       currentLng,
-      lastSeen:  firebase.firestore.FieldValue.serverTimestamp(),
-      track:     slim,
-      inUse:     true,
-    });
-  } catch(e) {
-    console.warn('GPS書き込みエラー:', e);
-    showToast('⚠️ 位置情報の送信失敗: ' + (e.code || e.message || e));
+  // 5000点超えたらガード：末尾5000点で全書き直し
+  const needsFullRewrite = trackSentUpTo === 0 || trackPoints.length > MAX_TRACK_POINTS;
+
+  if (needsFullRewrite) {
+    const slim = toSlim(trackPoints.slice(-MAX_TRACK_POINTS));
+    try {
+      await DEVICES_COL.doc(selectedVehicle).set({
+        vehicleId: selectedVehicle,
+        colorIdx:  selectedColorIdx,
+        lat:       currentLat,
+        lng:       currentLng,
+        lastSeen:  firebase.firestore.FieldValue.serverTimestamp(),
+        track:     slim,
+        inUse:     true,
+      });
+      trackSentUpTo = trackPoints.length;
+    } catch(e) {
+      trackSentUpTo = 0;
+      console.warn('GPS書き込みエラー:', e);
+      showToast('⚠️ 位置情報の送信失敗: ' + (e.code || e.message || e));
+    }
+  } else {
+    // 差分のみarrayUnionで追記
+    const newPts = toSlim(trackPoints.slice(trackSentUpTo));
+    const prev = trackSentUpTo;
+    trackSentUpTo = trackPoints.length;
+    const update = {
+      lat:      currentLat,
+      lng:      currentLng,
+      lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
+    };
+    if (newPts.length > 0) {
+      update.track = firebase.firestore.FieldValue.arrayUnion(...newPts);
+    }
+    try {
+      await DEVICES_COL.doc(selectedVehicle).update(update);
+    } catch(e) {
+      trackSentUpTo = prev;
+      console.warn('GPS書き込みエラー:', e);
+      showToast('⚠️ 位置情報の送信失敗: ' + (e.code || e.message || e));
+    }
   }
 }
 
@@ -1848,20 +1875,35 @@ window.addEventListener('beforeunload', () => {
    他端末のリアルタイム表示
    ================================================================ */
 
+let spectatorDevices = {}; // { vid: { lastSeen } } — 閲覧のみモードの他端末
+
 function startDevicesListener() {
   if (devicesUnsubscribe) devicesUnsubscribe();
   devicesUnsubscribe = DEVICES_COL.onSnapshot(snap => {
     // 毎回全スナップショットを処理する（docChanges不使用）
     // → 後から入った端末でも既存端末が確実に表示される
-    const activeVids = new Set();
+    const activeVids    = new Set();
+    const spectatorVids = new Set();
+    const ownDeviceId   = selectedVehicle || sessionStorage.getItem('patrol_own_device_id');
 
     snap.forEach(doc => {
       const d   = doc.data();
       const vid = doc.id;
-      if (vid === selectedVehicle) {
-        if (d.forceSpectator) applyForcedSpectatorMode();
+
+      // 自端末の doc を監視（閲覧のみモード中も含む）
+      if (vid === ownDeviceId) {
+        if (!spectatorMode && d.forceSpectator) applyForcedSpectatorMode();
+        if (d.forceLogout) applyForcedLogout();
         return;
       }
+
+      // 閲覧のみモードになった他端末
+      if (d.isSpectator) {
+        spectatorVids.add(vid);
+        spectatorDevices[vid] = { lastSeen: d.lastSeen ? d.lastSeen.toMillis() : 0 };
+        return;
+      }
+
       if (!d.inUse) return;
 
       activeVids.add(vid);
@@ -1875,6 +1917,11 @@ function startDevicesListener() {
     // activeVidsに含まれないデバイス（inUse:false / 削除）を地図から除去
     Object.keys(otherDevices).forEach(vid => {
       if (!activeVids.has(vid)) removeOtherDevice(vid);
+    });
+
+    // spectatorVidsから消えた端末をキャッシュから削除
+    Object.keys(spectatorDevices).forEach(vid => {
+      if (!spectatorVids.has(vid)) delete spectatorDevices[vid];
     });
 
     updateAdminDeviceList();
@@ -2108,6 +2155,8 @@ function updateAdminDeviceList() {
   }
 
   el.innerHTML = '';
+
+  // 稼働中端末
   Object.entries(all).forEach(([vid, info]) => {
     const ageMins = info.isSelf ? 0 : Math.floor((Date.now() - info.lastSeen) / 60000);
     const isOfflineWarn = ageMins >= 30;
@@ -2118,15 +2167,41 @@ function updateAdminDeviceList() {
       : isOffline    ? '【オフライン】'
       : ageMins < 1  ? '1分以内'
       : ageMins + '分前';
+    let actionBtn = '';
+    if (!info.isSelf) {
+      if (isOffline) {
+        actionBtn = `<button class="btn-kick btn-kick-logout" onclick="kickOfflineDevice('${escHtml(vid)}')">強制ログアウト</button>`;
+      } else {
+        actionBtn = `<button class="btn-kick" onclick="kickDevice('${escHtml(vid)}')">${isOfflineWarn ? '⚠️ ' : ''}閲覧のみに変更</button>`;
+      }
+    }
     row.innerHTML = `
       <span class="admin-dot" style="background:${info.color}"></span>
       <span class="admin-device-name">${escHtml(vid)}${info.isSelf ? ' (この端末)' : ''}</span>
       <span class="admin-device-time">${timeLabel}</span>
-      ${!info.isSelf
-        ? `<button class="btn-kick" onclick="kickDevice('${escHtml(vid)}')">${isOfflineWarn ? '⚠️ ' : ''}閲覧のみに変更</button>`
-        : ''}`;
+      ${actionBtn}`;
     el.appendChild(row);
   });
+
+  // 閲覧のみモード端末
+  const spectatorEntries = Object.entries(spectatorDevices);
+  if (spectatorEntries.length > 0) {
+    const sec = document.createElement('div');
+    sec.style.cssText = 'font-size:0.75rem;color:#718096;margin:10px 0 4px;font-weight:600;';
+    sec.textContent = '👁 閲覧のみモード端末';
+    el.appendChild(sec);
+    spectatorEntries.forEach(([vid]) => {
+      const row = document.createElement('div');
+      row.className = 'admin-device-row';
+      row.style.background = '#f7f7ff';
+      row.innerHTML = `
+        <span class="admin-dot" style="background:#a0aec0"></span>
+        <span class="admin-device-name">${escHtml(vid)}</span>
+        <span class="admin-device-time">閲覧のみ</span>
+        <button class="btn-kick btn-kick-logout" onclick="kickDeviceForceLogout('${escHtml(vid)}')">強制ログアウト</button>`;
+      el.appendChild(row);
+    });
+  }
 }
 
 async function kickDevice(vid) {
@@ -2140,18 +2215,51 @@ async function kickDevice(vid) {
   }
 }
 
+async function kickDeviceForceLogout(vid) {
+  if (!confirm(`「${vid}」を強制ログアウトさせますか？\n（端末はログイン画面に戻ります）`)) return;
+  try {
+    await DEVICES_COL.doc(vid).update({ forceLogout: true });
+    showToast(`✅ ${vid} を強制ログアウトしました`);
+  } catch(e) {
+    showToast('❌ 強制ログアウトに失敗しました: ' + e.message);
+  }
+}
+
+async function kickOfflineDevice(vid) {
+  if (!confirm(`「${vid}」はオフライン状態です。\n強制ログアウトしますか？\n（次回起動時にログイン画面が表示されます）`)) return;
+  try {
+    await DEVICES_COL.doc(vid).update({ forceLogout: true, inUse: false });
+    showToast(`✅ ${vid} を強制ログアウトしました`);
+  } catch(e) {
+    showToast('❌ 強制ログアウトに失敗しました: ' + e.message);
+  }
+}
+
 async function applyForcedSpectatorMode() {
+  const myVid = selectedVehicle;
   spectatorMode = true;
   localStorage.setItem('patrol_spectator', '1');
   localStorage.removeItem('patrol_vehicle');
   localStorage.removeItem('patrol_vehicle_idx');
+  if (myVid) sessionStorage.setItem('patrol_own_device_id', myVid);
   if (gpsWriteIntervalId) { clearInterval(gpsWriteIntervalId); gpsWriteIntervalId = null; }
   try {
-    await DEVICES_COL.doc(selectedVehicle).update({ forceSpectator: false, inUse: false });
+    await DEVICES_COL.doc(myVid).update({ forceSpectator: false, inUse: false, isSpectator: true });
   } catch(e) {}
   selectedVehicle = null;
   updateVehicleHeader();
   alert('⚠️ 管理者により閲覧のみモードに変更されました。');
+}
+
+async function applyForcedLogout() {
+  const myVid = sessionStorage.getItem('patrol_own_device_id');
+  sessionStorage.removeItem('patrol_auth');
+  sessionStorage.removeItem('patrol_own_device_id');
+  localStorage.removeItem('patrol_spectator');
+  if (myVid) {
+    try { await DEVICES_COL.doc(myVid).update({ forceLogout: false, isSpectator: false }); } catch(e) {}
+  }
+  location.reload();
 }
 
 
@@ -2225,10 +2333,10 @@ setInterval(async () => {
   }
 }, 60000);
 
-async function takeBackup(dateStr, hour) {
-  const slotSuffix = String(hour).padStart(2, '0') + '00';
-  const docId  = dateStr.replace(/-/g, '') + '_' + slotSuffix;
-  const label  = `${dateStr} ${String(hour).padStart(2, '0')}:00`;
+async function takeBackup(dateStr, hour, slotSuffix = null, isManual = false) {
+  const suffix = slotSuffix || String(hour).padStart(2, '0') + '00';
+  const docId  = dateStr.replace(/-/g, '') + '_' + suffix;
+  const label  = `${dateStr} ${suffix.slice(0, 2)}:${suffix.slice(2, 4)}`;
 
   const states = {};
   checkpoints.forEach(cp => {
@@ -2250,6 +2358,7 @@ async function takeBackup(dateStr, hour) {
     await BACKUP_COL.doc(docId).set({
       createdAt:   firebase.firestore.FieldValue.serverTimestamp(),
       slotLabel:   label,
+      isManual:    isManual,
       checkStates: states,
       checkpoints: cpDefs,
       folders:     folderDefs,
@@ -2257,8 +2366,11 @@ async function takeBackup(dateStr, hour) {
     });
     await cleanupOldBackups();
     showToast(`📦 ${label} のバックアップを保存しました`);
+    return true;
   } catch(e) {
     console.warn('バックアップ保存失敗:', e);
+    showToast('❌ バックアップ保存失敗: ' + (e.code || e.message || '不明なエラー'));
+    return false;
   }
 }
 
@@ -2279,40 +2391,115 @@ async function cleanupOldBackups() {
 
 let _selectedBackupSlot = '1200';
 
+async function takeManualBackup() {
+  const btn = document.getElementById('btn-manual-backup');
+  if (btn) { btn.disabled = true; btn.textContent = '💾 保存中…'; }
+  const jstNow = new Date(Date.now() + 9 * 3600000);
+  const dateStr = jstNow.toISOString().slice(0, 10);
+  const hh = String(jstNow.getUTCHours()).padStart(2, '0');
+  const mm = String(jstNow.getUTCMinutes()).padStart(2, '0');
+  const suffix = hh + mm;
+  const docId = dateStr.replace(/-/g, '') + '_' + suffix;
+  const ok = await takeBackup(dateStr, null, suffix, true);
+  if (ok) storeManualBackupId(docId);
+  if (btn) { btn.disabled = false; btn.textContent = '💾 手動バックアップ'; }
+}
+
 function openBackupViewer() {
   const now = new Date(Date.now() + 9 * 3600000);
-  document.getElementById('backup-date-input').value = now.toISOString().slice(0, 10);
-  _selectedBackupSlot = '1200';
-  document.getElementById('bslot-1200').classList.add('active');
-  document.getElementById('bslot-1600').classList.remove('active');
-  document.getElementById('backup-data').innerHTML =
-    '<div style="color:#a0aec0;text-align:center;padding:20px;font-size:0.85rem">日付と時刻を選択して「読み込む」を押してください</div>';
+  const dateVal = now.toISOString().slice(0, 10);
+  document.getElementById('backup-date-input').value = dateVal;
+  document.getElementById('backup-data').innerHTML = '';
   document.getElementById('backup-overlay').classList.remove('hidden');
+  refreshBackupSlots(dateVal);
 }
 
 function closeBackupViewer() {
   document.getElementById('backup-overlay').classList.add('hidden');
 }
 
-function selectBackupSlot(btn, slot) {
-  _selectedBackupSlot = slot;
-  document.querySelectorAll('.backup-slot-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
+function storeManualBackupId(docId) {
+  try {
+    const cutoff = Date.now() - 72 * 3600000;
+    const list = JSON.parse(localStorage.getItem('patrol_manual_backup_ids') || '[]')
+      .filter(m => m.ts > cutoff);
+    if (!list.find(m => m.docId === docId)) list.push({ docId, ts: Date.now() });
+    localStorage.setItem('patrol_manual_backup_ids', JSON.stringify(list));
+  } catch(e) {}
 }
 
-async function loadBackupSlot() {
-  const dateVal = document.getElementById('backup-date-input').value;
-  if (!dateVal) { showToast('日付を選択してください'); return; }
-  const docId = dateVal.replace(/-/g, '') + '_' + _selectedBackupSlot;
+function getManualBackupIds() {
+  try {
+    const cutoff = Date.now() - 72 * 3600000;
+    return JSON.parse(localStorage.getItem('patrol_manual_backup_ids') || '[]')
+      .filter(m => m.ts > cutoff)
+      .map(m => m.docId);
+  } catch(e) { return []; }
+}
+
+async function refreshBackupSlots(dateVal) {
+  const listEl = document.getElementById('backup-slot-list');
+  const dataEl = document.getElementById('backup-data');
+  listEl.innerHTML = '<span style="color:#a0aec0;font-size:0.8rem;align-self:center;">読み込み中…</span>';
+  dataEl.innerHTML = '';
+  if (!dateVal) { listEl.innerHTML = ''; return; }
+
+  const prefix = dateVal.replace(/-/g, '');
+
+  // 自動スロット（12:00・16:00）＋ localStorageの手動バックアップ
+  const candidates = [
+    { docId: prefix + '_1200', suffix: '1200', isManual: false },
+    { docId: prefix + '_1600', suffix: '1600', isManual: false },
+    ...getManualBackupIds()
+      .filter(id => id.startsWith(prefix + '_'))
+      .map(id => ({ docId: id, suffix: id.slice(prefix.length + 1), isManual: true })),
+  ];
+
+  // 各ドキュメントを個別に存在確認（コレクション全件取得を避ける）
+  const results = await Promise.all(candidates.map(async s => {
+    try {
+      const snap = await BACKUP_COL.doc(s.docId).get();
+      return snap.exists ? s : null;
+    } catch(e) { return null; }
+  }));
+
+  const slots = results.filter(Boolean).sort((a, b) => a.suffix.localeCompare(b.suffix));
+
+  if (slots.length === 0) {
+    listEl.innerHTML = '<span style="color:#a0aec0;font-size:0.8rem;align-self:center;">この日のバックアップはありません</span>';
+    return;
+  }
+
+  listEl.innerHTML = '';
+  slots.forEach(({ docId, suffix, isManual }) => {
+    const hh = suffix.slice(0, 2);
+    const mm = suffix.slice(2, 4);
+    const btn = document.createElement('button');
+    btn.className = 'backup-slot-btn';
+    btn.textContent = (isManual ? '💾 ' : '🤖 ') + hh + ':' + mm;
+    btn.title = isManual ? '手動バックアップ' : '自動バックアップ';
+    btn.onclick = () => {
+      document.querySelectorAll('#backup-slot-list .backup-slot-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadBackupByDocId(docId);
+    };
+    listEl.appendChild(btn);
+  });
+}
+
+let _currentBackupData = null;
+
+async function loadBackupByDocId(docId) {
   const el = document.getElementById('backup-data');
   el.innerHTML = '<div style="text-align:center;padding:20px;color:#718096;font-size:0.85rem">読み込み中…</div>';
   try {
     const snap = await BACKUP_COL.doc(docId).get();
     if (!snap.exists) {
-      el.innerHTML = '<div style="text-align:center;padding:20px;color:#a0aec0;font-size:0.85rem">このスロットのバックアップデータがありません</div>';
+      el.innerHTML = '<div style="text-align:center;padding:20px;color:#a0aec0;font-size:0.85rem">データがありません</div>';
       return;
     }
-    renderBackupData(snap.data(), el);
+    _currentBackupData = snap.data();
+    renderBackupData(_currentBackupData, el);
   } catch(e) {
     el.innerHTML = '<div style="text-align:center;padding:20px;color:#e53e3e;font-size:0.85rem">読み込みに失敗しました</div>';
   }
@@ -2328,7 +2515,11 @@ function renderBackupData(data, container) {
   });
   const states = data.checkStates || {};
 
-  let html = `<div style="font-size:0.75rem;color:#718096;margin-bottom:10px">📅 ${escHtml(data.slotLabel)} 時点のバックアップ</div>`;
+  let html = `<div style="font-size:0.75rem;color:#718096;margin-bottom:8px">📅 ${escHtml(data.slotLabel)} 時点のバックアップ</div>`;
+  html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+    <button class="btn-admin-action" onclick="exportCheckCsv()">📥 チェックデータCSV</button>
+    <button class="btn-admin-action" onclick="exportTrackCsv()">📥 走行軌跡CSV</button>
+  </div>`;
 
   // チェック記録
   html += '<div style="font-weight:700;font-size:0.82rem;color:#4a5568;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #e2e8f0">📋 チェック記録</div>';
@@ -2372,6 +2563,84 @@ function renderBackupData(data, container) {
   }
 
   container.innerHTML = html;
+}
+
+
+/* ================================================================
+   バックアップ CSV エクスポート
+   ================================================================ */
+
+function csvEscape(val) {
+  const s = String(val == null ? '' : val);
+  return (s.includes(',') || s.includes('"') || s.includes('\n'))
+    ? '"' + s.replace(/"/g, '""') + '"'
+    : s;
+}
+
+function downloadCsv(filename, rows) {
+  const bom     = '﻿';
+  const content = bom + rows.map(r => r.map(csvEscape).join(',')).join('\r\n');
+  const blob    = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+  const url     = URL.createObjectURL(blob);
+  const a       = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportCheckCsv() {
+  if (!_currentBackupData) return;
+  const data = _currentBackupData;
+  const rows = [['バックアップ日時', 'フォルダ名', 'チェックポイント名', '状態', 'チェック時間']];
+
+  const cpsByFolder = {};
+  (data.checkpoints || []).forEach(cp => {
+    if (!cpsByFolder[cp.folderId]) cpsByFolder[cp.folderId] = [];
+    cpsByFolder[cp.folderId].push(cp);
+  });
+  const states = data.checkStates || {};
+
+  (data.folders || []).forEach(f => {
+    (cpsByFolder[f.id] || []).forEach(cp => {
+      const st = states[cp.id] || {};
+      rows.push([
+        data.slotLabel || '',
+        f.name,
+        cp.name,
+        st.checked ? '完了' : '未完了',
+        st.checkedAt || '',
+      ]);
+    });
+  });
+
+  const label = (data.slotLabel || 'backup').replace(/[\s:]/g, '-');
+  downloadCsv(`チェックデータ_${label}.csv`, rows);
+}
+
+function exportTrackCsv() {
+  if (!_currentBackupData) return;
+  const data   = _currentBackupData;
+  const tracks = data.tracks || {};
+  const rows   = [['端末名', '緯度', '経度', '日時（JST）']];
+  const pad2   = n => String(n).padStart(2, '0');
+
+  Object.entries(tracks).forEach(([vid, pts]) => {
+    if (!pts || pts.length === 0) return;
+    pts.forEach(p => {
+      const lat = Array.isArray(p) ? p[0] : p.a;
+      const lng = Array.isArray(p) ? p[1] : p.b;
+      const ts  = Array.isArray(p) ? p[2] : p.c;
+      let dtStr = '';
+      if (ts) {
+        const d = new Date(ts + 9 * 3600000); // UTC→JST
+        dtStr = `${d.getUTCFullYear()}-${pad2(d.getUTCMonth()+1)}-${pad2(d.getUTCDate())} `
+              + `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`;
+      }
+      rows.push([vid, lat, lng, dtStr]);
+    });
+  });
+
+  const label = (data.slotLabel || 'backup').replace(/[\s:]/g, '-');
+  downloadCsv(`走行軌跡_${label}.csv`, rows);
 }
 
 
@@ -2506,12 +2775,8 @@ function applyRenameFolder(folderId, newName) {
 function toggleFolder(folderId) {
   const folder = folders.find(f => f.id === folderId);
   if (!folder) return;
-  if (currentMode === 'edit') {
-    activeFolderId = folderId;
-    folder.collapsed = false;
-  } else {
-    folder.collapsed = !folder.collapsed;
-  }
+  if (currentMode === 'edit') activeFolderId = folderId;
+  folder.collapsed = !folder.collapsed;
   renderList();
   saveFolderCollapsedToLocal();
 }
@@ -3125,24 +3390,10 @@ function renderReport() {
       <div class="report-folder-title">
         📁 ${escHtml(folder.name)}
         <span class="rfolder-badge ${allDone ? 'all-done' : ''}">${done}/${total}</span>
+        <span class="report-badge ${allDone ? 'badge-ok' : (done > 0 ? '' : 'badge-ng')}" style="margin-left:auto">
+          ${allDone ? '完了' : done + '件完了'}
+        </span>
       </div>`;
-
-    folderCps.forEach((cp, i) => {
-      const row = document.createElement('div');
-      row.className = 'report-row' + (cp.checked ? ' checked' : '');
-      row.innerHTML = `
-        <div class="report-icon">${cp.checked ? '✅' : '⬜'}</div>
-        <div class="report-info">
-          <div class="report-name">${i + 1}. ${escHtml(cp.name)}</div>
-          <div class="report-time">
-            ${cp.checked ? '完了: ' + cp.checkedAt : '未チェック'}
-          </div>
-        </div>
-        <span class="report-badge ${cp.checked ? 'badge-ok' : 'badge-ng'}">
-          ${cp.checked ? 'OK' : 'NG'}
-        </span>`;
-      group.appendChild(row);
-    });
 
     list.appendChild(group);
   });
@@ -3318,6 +3569,7 @@ function toggleTrackVisibility() {
 
 function clearOwnTrack() {
   trackPoints = [];
+  trackSentUpTo = 0;
   ownTrackSegments.forEach(s => map.removeLayer(s)); ownTrackSegments = [];
   ownStopMarkers.forEach(s => map.removeLayer(s));   ownStopMarkers   = [];
   if (trackPolyline) { map.removeLayer(trackPolyline); trackPolyline = null; }
@@ -3339,6 +3591,18 @@ function loadTrackFromStorage() {
   if (!raw) return;
   try {
     const data = JSON.parse(raw);
+    if (data.length === 0) return;
+
+    // 当日8:20 JST のタイムスタンプを基準に、それ以前のデータは前日扱いで破棄
+    const nowJst = Date.now() + 9 * 3600000;
+    const todayStr = new Date(nowJst).toISOString().slice(0, 10);
+    const resetMs = new Date(todayStr + 'T08:20:00+09:00').getTime();
+    const newestTs = data[data.length - 1][2];
+    if (newestTs < resetMs) {
+      localStorage.removeItem('patrol_track');
+      return;
+    }
+
     trackPoints = data.map(p => ({ lat: p[0], lng: p[1], ts: p[2] }));
     if (trackPoints.length > 0) updateTrackPolyline();
   } catch(e) {}
