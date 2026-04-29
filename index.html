@@ -13,6 +13,7 @@
 
   <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 
   <style>
@@ -1092,6 +1093,7 @@ const firebaseConfig = {
 };
 
 firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
 const db = firebase.firestore();
 const SHARED_DOC  = db.collection('patrol').doc('shared');
 const DEVICES_COL = db.collection('patrol_devices');
@@ -4117,23 +4119,28 @@ function parseCsvLine(line) {
    パスワード認証 & アプリ起動
    ================================================================ */
 
-const _APP_PASSWORD = 'itakugomi0';
+const _APP_PASSWORD_HASH = 'd284249e0cb965996663eab35c6875209e7ddedd20bd090521fe9d01be03de35';
+
+async function hashPassword(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 function checkPassword() {
   if (sessionStorage.getItem('patrol_auth') === '1') {
     initApp();
     return;
   }
-  // オーバーレイはHTMLで最初から表示済み
   setTimeout(() => {
     const inp = document.getElementById('password-input');
     if (inp) inp.focus();
   }, 100);
 }
 
-function submitPassword() {
+async function submitPassword() {
   const val = document.getElementById('password-input').value;
-  if (val === _APP_PASSWORD) {
+  const hash = await hashPassword(val);
+  if (hash === _APP_PASSWORD_HASH) {
     sessionStorage.setItem('patrol_auth', '1');
     document.getElementById('password-overlay').classList.add('hidden');
     initApp();
@@ -4148,17 +4155,17 @@ document.getElementById('password-input').addEventListener('keydown', function(e
   if (e.key === 'Enter') submitPassword();
 });
 
-function initApp() {
+async function initApp() {
+  try {
+    await auth.signInAnonymously();
+  } catch(e) {
+    console.warn('匿名認証失敗:', e);
+  }
   setMode('collect');
-  // 1. チェックポイント同期開始（最初のスナップショット後に車両選択を表示）
   startFirestoreListenerThenVehicleSelect();
-  // 2. ローカル軌跡読み込み
   loadTrackFromStorage();
-  // 3. 他端末リアルタイム表示
   startDevicesListener();
-  // 4. GPS開始
   startGPS();
-  // 5. 初期設定ボタン更新
   updateResetButton();
 }
 

@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // patrol コレクション（チェックポイント・フォルダの共有データ）
+    match /patrol/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // patrol_devices コレクション（GPS位置・走行軌跡）
+    match /patrol_devices/{deviceId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // patrol_backups コレクション（バックアップデータ）
+    match /patrol_backups/{backupId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // その他のコレクションはすべて拒否
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
