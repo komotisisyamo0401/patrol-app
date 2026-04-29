@@ -997,9 +997,9 @@
   <div id="side-panel">
 
     <div class="tab-bar">
-      <button class="tab-btn active" onclick="switchTab('list', event)">📋 一覧</button>
-      <button class="tab-btn"        onclick="switchTab('report', event)">📊 レポート</button>
-      <button class="tab-btn"        onclick="switchTab('review', event)">🔍 確認</button>
+      <button class="tab-btn active" id="tab-btn-list"   onclick="switchTab('list', event)">📋 一覧</button>
+      <button class="tab-btn"        id="tab-btn-report" onclick="switchTab('report', event)">📊 レポート</button>
+      <button class="tab-btn"        id="tab-btn-review" onclick="switchTab('review', event)" style="display:none">🔍 確認</button>
     </div>
 
     <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="importCsv(this)">
@@ -1039,7 +1039,7 @@
 
     <div id="tab-review" class="tab-content">
       <div class="review-file-group">
-        <div class="review-file-title">📋 チェックデータCSV</div>
+        <div class="review-file-title">📋 チェックデータCSV（インポート）</div>
         <button class="btn-review-import"
                 onclick="document.getElementById('review-check-input').click()">📂 ファイルを選択</button>
         <input type="file" id="review-check-input" accept=".csv" style="display:none"
@@ -1047,7 +1047,7 @@
         <div class="review-status" id="review-check-status">未読み込み</div>
       </div>
       <div class="review-file-group">
-        <div class="review-file-title">🗺️ 走行軌跡CSV</div>
+        <div class="review-file-title">🗺️ 走行軌跡CSV（インポート）</div>
         <button class="btn-review-import"
                 onclick="document.getElementById('review-track-input').click()">📂 ファイルを選択</button>
         <input type="file" id="review-track-input" accept=".csv" style="display:none"
@@ -1721,6 +1721,9 @@ function setMode(mode) {
   const btnReview  = document.getElementById('btn-mode-review');
   const hintEl     = document.getElementById('mode-hint');
 
+  const tabBtnList   = document.getElementById('tab-btn-list');
+  const tabBtnReview = document.getElementById('tab-btn-review');
+
   if (mode === 'edit') {
     modeBar.className    = 'mode-edit';
     mapEl.className      = 'mode-edit';
@@ -1735,6 +1738,9 @@ function setMode(mode) {
       '<strong>📍 追加モード</strong>' +
       'フォルダをタップして追加先を選択し、地図をクリックしてチェックポイントを追加してください。';
     checkpoints.forEach(cp => { if (cp.marker && cp.marker.dragging) cp.marker.dragging.enable(); });
+    if (tabBtnList)   tabBtnList.style.display   = '';
+    if (tabBtnReview) tabBtnReview.style.display = 'none';
+    switchTab('list');
   } else if (mode === 'review') {
     modeBar.className    = 'mode-review';
     mapEl.className      = 'mode-collect';
@@ -1748,6 +1754,8 @@ function setMode(mode) {
     hintEl.innerHTML     =
       '<strong>🔍 確認モード</strong>CSVをインポートして走行軌跡とチェック結果を地図で確認できます。';
     checkpoints.forEach(cp => { if (cp.marker && cp.marker.dragging) cp.marker.dragging.disable(); });
+    if (tabBtnList)   tabBtnList.style.display   = 'none';
+    if (tabBtnReview) tabBtnReview.style.display = '';
     showReviewLayers();
     switchTab('review');
   } else {
@@ -1764,6 +1772,9 @@ function setMode(mode) {
       '<strong>🚛 回収モード</strong>' +
       'GPS円(10m)とCP円(12m)が接触し10秒間持続すると自動チェックされます。手動操作も可能です。';
     checkpoints.forEach(cp => { if (cp.marker && cp.marker.dragging) cp.marker.dragging.disable(); });
+    if (tabBtnList)   tabBtnList.style.display   = '';
+    if (tabBtnReview) tabBtnReview.style.display = 'none';
+    switchTab('list');
   }
 
   renderList();
@@ -2599,8 +2610,8 @@ function renderBackupData(data, container) {
 
   let html = `<div style="font-size:0.75rem;color:#718096;margin-bottom:8px">📅 ${escHtml(data.slotLabel)} 時点のバックアップ</div>`;
   html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-    <button class="btn-admin-action" onclick="exportCheckCsv()">📥 チェックデータCSV</button>
-    <button class="btn-admin-action" onclick="exportTrackCsv()">📥 走行軌跡CSV</button>
+    <button class="btn-admin-action" onclick="exportCheckCsv()">📥 チェックデータCSV（エクスポート）</button>
+    <button class="btn-admin-action" onclick="exportTrackCsv()">📥 走行軌跡CSV（エクスポート）</button>
   </div>`;
 
   // チェック記録
@@ -3644,7 +3655,12 @@ function switchTab(tabName, e) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
   document.getElementById('tab-' + tabName).classList.add('active');
-  if (e && e.target) e.target.classList.add('active');
+  if (e && e.target) {
+    e.target.classList.add('active');
+  } else {
+    const btn = document.getElementById('tab-btn-' + tabName);
+    if (btn) btn.classList.add('active');
+  }
   if (tabName === 'report') renderReport();
   if (tabName === 'review') renderReviewSummary();
 }
