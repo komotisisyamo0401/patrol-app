@@ -8,7 +8,7 @@
     script-src 'self' 'unsafe-inline' https://www.gstatic.com https://unpkg.com;
     style-src 'self' 'unsafe-inline' https://unpkg.com;
     connect-src 'self' https://*.googleapis.com https://*.firebase.com https://*.firebaseio.com wss://*.firebaseio.com;
-    img-src 'self' data: https://*.tile.openstreetmap.org;
+    img-src 'self' data: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com;
     font-src 'self';
     object-src 'none';
     worker-src 'self';
@@ -2373,7 +2373,7 @@ async function applyForcedSpectatorMode() {
 
 async function applyForcedLogout() {
   const myVid = sessionStorage.getItem('patrol_own_device_id');
-  sessionStorage.removeItem('patrol_auth');
+  localStorage.removeItem('patrol_auth');
   sessionStorage.removeItem('patrol_own_device_id');
   localStorage.removeItem('patrol_spectator');
   if (myVid) {
@@ -4152,7 +4152,7 @@ async function hashPassword(str) {
 }
 
 function checkPassword() {
-  if (sessionStorage.getItem('patrol_auth') === '1') {
+  if (localStorage.getItem('patrol_auth') === '1') {
     initApp();
     return;
   }
@@ -4166,7 +4166,7 @@ async function submitPassword() {
   const val = document.getElementById('password-input').value;
   const hash = await hashPassword(val);
   if (hash === _APP_PASSWORD_HASH) {
-    sessionStorage.setItem('patrol_auth', '1');
+    localStorage.setItem('patrol_auth', '1');
     document.getElementById('password-overlay').classList.add('hidden');
     initApp();
   } else {
