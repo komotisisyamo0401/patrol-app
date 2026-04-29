@@ -3,6 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' 'unsafe-inline' https://www.gstatic.com https://unpkg.com;
+    style-src 'self' 'unsafe-inline' https://unpkg.com;
+    connect-src 'self' https://*.googleapis.com https://*.firebase.com https://*.firebaseio.com wss://*.firebaseio.com;
+    img-src 'self' data: https://*.tile.openstreetmap.org;
+    font-src 'self';
+    object-src 'none';
+    worker-src 'self';
+  " />
   <title>ゴミ回収チェックアプリ</title>
   <link rel="manifest" href="./manifest.json" />
   <meta name="theme-color" content="#2b6cb0" />
@@ -2136,7 +2146,12 @@ function renderAdminTrackClearList() {
     const row = document.createElement('div');
     row.className = 'admin-action-row';
     const label = isSelf ? `${vid}（この端末）` : vid;
-    row.innerHTML = `<button class="btn-admin-action" onclick="adminClearTrackByDevice('${escHtml(vid)}',${isSelf})">🗑 ${escHtml(label)}</button>`;
+    const btn = document.createElement('button');
+    btn.className = 'btn-admin-action';
+    btn.textContent = `🗑 ${label}`;
+    btn.dataset.vid = vid;
+    btn.addEventListener('click', () => adminClearTrackByDevice(btn.dataset.vid, isSelf));
+    row.appendChild(btn);
     el.appendChild(row);
   });
 }
@@ -2262,19 +2277,24 @@ function updateAdminDeviceList() {
       : isOffline    ? '【オフライン】'
       : ageMins < 1  ? '1分以内'
       : ageMins + '分前';
-    let actionBtn = '';
-    if (!info.isSelf) {
-      if (isOffline) {
-        actionBtn = `<button class="btn-kick btn-kick-logout" onclick="kickOfflineDevice('${escHtml(vid)}')">強制ログアウト</button>`;
-      } else {
-        actionBtn = `<button class="btn-kick" onclick="kickDevice('${escHtml(vid)}')">${isOfflineWarn ? '⚠️ ' : ''}閲覧のみに変更</button>`;
-      }
-    }
     row.innerHTML = `
       <span class="admin-dot" style="background:${info.color}"></span>
       <span class="admin-device-name">${escHtml(vid)}${info.isSelf ? ' (この端末)' : ''}</span>
-      <span class="admin-device-time">${timeLabel}</span>
-      ${actionBtn}`;
+      <span class="admin-device-time">${timeLabel}</span>`;
+    if (!info.isSelf) {
+      const btn = document.createElement('button');
+      btn.dataset.vid = vid;
+      if (isOffline) {
+        btn.className = 'btn-kick btn-kick-logout';
+        btn.textContent = '強制ログアウト';
+        btn.addEventListener('click', () => kickOfflineDevice(btn.dataset.vid));
+      } else {
+        btn.className = 'btn-kick';
+        btn.textContent = (isOfflineWarn ? '⚠️ ' : '') + '閲覧のみに変更';
+        btn.addEventListener('click', () => kickDevice(btn.dataset.vid));
+      }
+      row.appendChild(btn);
+    }
     el.appendChild(row);
   });
 
@@ -2292,8 +2312,13 @@ function updateAdminDeviceList() {
       row.innerHTML = `
         <span class="admin-dot" style="background:#a0aec0"></span>
         <span class="admin-device-name">${escHtml(vid)}</span>
-        <span class="admin-device-time">閲覧のみ</span>
-        <button class="btn-kick btn-kick-logout" onclick="kickDeviceForceLogout('${escHtml(vid)}')">強制ログアウト</button>`;
+        <span class="admin-device-time">閲覧のみ</span>`;
+      const btn = document.createElement('button');
+      btn.className = 'btn-kick btn-kick-logout';
+      btn.textContent = '強制ログアウト';
+      btn.dataset.vid = vid;
+      btn.addEventListener('click', () => kickDeviceForceLogout(btn.dataset.vid));
+      row.appendChild(btn);
       el.appendChild(row);
     });
   }
