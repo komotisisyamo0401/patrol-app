@@ -801,7 +801,10 @@
     }
     .cp-popup-btn.check   { background: #38a169; color: white; }
     .cp-popup-btn.uncheck { background: #e53e3e; color: white; }
+    .cp-popup-btn.delete  { background: #e2e8f0; color: #4a5568; }
+    .cp-popup-btn.delete:active { background: #cbd5e0; }
     .cp-popup-time { font-size: 0.7rem; color: #38a169; margin-bottom: 6px; }
+    .cp-popup-delete-row { margin-top: 6px; border-top: 1px solid #e2e8f0; padding-top: 6px; display: flex; }
 
     .admin-section-title {
       font-size: 0.78rem; font-weight: 700; color: #718096;
@@ -1265,6 +1268,9 @@ async function selectVehicle(vehicleName, colorIdx) {
   selectedColorIdx = colorIdx;
   localStorage.setItem('patrol_vehicle', vehicleName);
   localStorage.setItem('patrol_vehicle_idx', colorIdx);
+
+  // 万が一残っていた強制ログアウトフラグを選択時にリセット
+  try { await DEVICES_COL.doc(vehicleName).update({ forceLogout: false }); } catch(e) {}
 
   document.getElementById('vehicle-select-overlay').classList.add('hidden');
   updateVehicleHeader();
@@ -2412,12 +2418,15 @@ async function applyForcedSpectatorMode() {
 }
 
 async function applyForcedLogout() {
-  const myVid = sessionStorage.getItem('patrol_own_device_id');
+  // selectedVehicle を優先して取得（通常モードでは patrol_own_device_id はsessionStorageに存在しない）
+  const myVid = selectedVehicle || sessionStorage.getItem('patrol_own_device_id');
   localStorage.removeItem('patrol_auth');
+  localStorage.removeItem('patrol_vehicle');
+  localStorage.removeItem('patrol_vehicle_idx');
   sessionStorage.removeItem('patrol_own_device_id');
   localStorage.removeItem('patrol_spectator');
   if (myVid) {
-    try { await DEVICES_COL.doc(myVid).update({ forceLogout: false, isSpectator: false }); } catch(e) {}
+    try { await DEVICES_COL.doc(myVid).update({ forceLogout: false, isSpectator: false, inUse: false }); } catch(e) {}
   }
   location.reload();
 }
@@ -2427,14 +2436,16 @@ async function applyForcedLogout() {
    毎日リセット処理
    ================================================================ */
 
-// 毎日8:30 JST に全チェックポイントを自動リセット
-let lastAutoUncheckDate = '';
+// 毎日8:20 JST に全チェックポイントを自動リセット
+// localStorageに実行日を保存してページリロード後の2重実行を防ぐ
+let lastAutoUncheckDate = localStorage.getItem('patrol_uncheck_date') || '';
 setInterval(() => {
   const now = new Date(Date.now() + 9 * 3600000); // JST換算
   if (now.getUTCHours() === 8 && now.getUTCMinutes() === 20) {
     const today = now.toISOString().slice(0, 10);
-    if (lastAutoUncheckDate === today) return; // 同分内の多重実行防止
+    if (lastAutoUncheckDate === today) return; // 同分内・同日の多重実行防止
     lastAutoUncheckDate = today;
+    localStorage.setItem('patrol_uncheck_date', today);
     const targets = checkpoints.filter(c => c.checked);
     if (targets.length === 0) return;
     targets.forEach(cp => {
@@ -2450,13 +2461,15 @@ setInterval(() => {
 }, 60000);
 
 // 毎日8:20 JST に走行軌跡を自動削除（チェック自動リセットと同タイミング）
-let lastTrackResetDate = '';
+// localStorageに実行日を保存してページリロード後の2重実行を防ぐ
+let lastTrackResetDate = localStorage.getItem('patrol_track_reset_date') || '';
 setInterval(async () => {
   const now = new Date(Date.now() + 9 * 3600000); // JST
   if (now.getUTCHours() === 8 && now.getUTCMinutes() === 20) {
     const today = now.toISOString().slice(0, 10);
     if (lastTrackResetDate === today) return;
     lastTrackResetDate = today;
+    localStorage.setItem('patrol_track_reset_date', today);
 
     // 自端末の軌跡をクリア
     clearOwnTrack();
@@ -3966,12 +3979,17 @@ function loadTrackFromStorage() {
     const data = JSON.parse(raw);
     if (data.length === 0) return;
 
-    // 当日8:20 JST のタイムスタンプを基準に、それ以前のデータは前日扱いで破棄
+    // 直近のリセット時刻を正確に計算する
+    // 現在が8:20以降なら「今日の8:20」、未満なら「昨日の8:20」が最後のリセット時刻
     const nowJst = Date.now() + 9 * 3600000;
     const todayStr = new Date(nowJst).toISOString().slice(0, 10);
-    const resetMs = new Date(todayStr + 'T08:20:00+09:00').getTime();
+    const todayResetMs = new Date(todayStr + 'T08:20:00+09:00').getTime();
+    const lastResetMs = Date.now() >= todayResetMs
+      ? todayResetMs
+      : todayResetMs - 24 * 3600000; // 今日の8:20未満 → 昨日の8:20が最後のリセット
+
     const newestTs = data[data.length - 1][2];
-    if (newestTs < resetMs) {
+    if (newestTs < lastResetMs) {
       localStorage.removeItem('patrol_track');
       return;
     }
@@ -4028,7 +4046,18 @@ function makePopupHtml(cp) {
       <div class="cp-popup-coord">${cp.lat.toFixed(5)}, ${cp.lng.toFixed(5)}</div>
       ${timeRow}
       <div class="cp-popup-actions">${actionBtn}</div>
+      <div class="cp-popup-delete-row">
+        <button class="cp-popup-btn delete" onclick="deletePointWithConfirm(${cp.id})">削除</button>
+      </div>
     </div>`;
+}
+
+function deletePointWithConfirm(id) {
+  const cp = checkpoints.find(c => c.id === id);
+  if (!cp) return;
+  if (!confirm(`「${cp.name}」を削除しますか？\n\nチェックポイント自体を完全に削除します。\nチェックを外すだけであれば「取り消し」ボタンを使用してください。`)) return;
+  map.closePopup();
+  deletePoint(id);
 }
 
 function escHtml(str) {
